@@ -1,0 +1,214 @@
+package services
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
+	"gorm.io/gorm"
+)
+
+// DeviceService handles device management operations
+type DeviceService struct {
+	db          *gorm.DB
+	credService *CredentialService
+	sshClient   *ssh.Client
+	validator   *ValidatorService
+}
+
+// NewDeviceService creates a new device service
+func NewDeviceService(db *gorm.DB, credService *CredentialService, sshClient *ssh.Client) *DeviceService {
+	return &DeviceService{
+		db:          db,
+		credService: credService,
+		sshClient:   sshClient,
+		validator:   NewValidatorService(sshClient),
+	}
+}
+
+// CreateDevice creates a new device and stores its credentials
+func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredentials) error {
+	// Validate IP address
+	if !ValidateIPAddress(device.IPAddress) {
+		return fmt.Errorf("invalid IP address: %s", device.IPAddress)
+	}
+
+	// Check if device with this IP already exists
+	var existing models.Device
+	if err := s.db.Where("ip_address = ?", device.IPAddress).First(&existing).Error; err == nil {
+		return fmt.Errorf("device with IP %s already exists", device.IPAddress)
+	}
+
+	// Generate UUID for device
+	if device.ID == uuid.Nil {
+		device.ID = uuid.New()
+	}
+
+	// Store credentials in keychain
+	if err := s.credService.StoreCredentials(device.ID.String(), creds); err != nil {
+		return fmt.Errorf("failed to store credentials: %w", err)
+	}
+
+	// Set credential key reference
+	device.CredentialKey = device.ID.String()
+
+	// Create device in database
+	if err := s.db.Create(device).Error; err != nil {
+		// Cleanup credentials if database insert fails
+		s.credService.DeleteCredentials(device.ID.String())
+		return fmt.Errorf("failed to create device: %w", err)
+	}
+
+	return nil
+}
+
+// GetDevice retrieves a device by ID
+func (s *DeviceService) GetDevice(id uuid.UUID) (*models.Device, error) {
+	var device models.Device
+	if err := s.db.First(&device, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("device not found")
+		}
+		return nil, err
+	}
+	return &device, nil
+}
+
+// ListDevices retrieves all devices
+func (s *DeviceService) ListDevices() ([]models.Device, error) {
+	var devices []models.Device
+	if err := s.db.Order("created_at desc").Find(&devices).Error; err != nil {
+		return nil, err
+	}
+	return devices, nil
+}
+
+// UpdateDevice updates a device
+func (s *DeviceService) UpdateDevice(id uuid.UUID, updates map[string]interface{}) error {
+	if err := s.db.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update device: %w", err)
+	}
+	return nil
+}
+
+// DeleteDevice deletes a device and its credentials
+func (s *DeviceService) DeleteDevice(id uuid.UUID) error {
+	// Delete credentials from keychain
+	if err := s.credService.DeleteCredentials(id.String()); err != nil {
+		// Log error but continue with device deletion
+		fmt.Printf("Warning: failed to delete credentials: %v\n", err)
+	}
+
+	// Close SSH connection if any
+	device, err := s.GetDevice(id)
+	if err == nil {
+		s.sshClient.Close(device.IPAddress + ":22")
+	}
+
+	// Delete device from database
+	if err := s.db.Delete(&models.Device{}, "id = ?", id).Error; err != nil {
+		return fmt.Errorf("failed to delete device: %w", err)
+	}
+
+	return nil
+}
+
+// TestConnectionWithCredentials tests SSH connection with provided credentials (no device required)
+func (s *DeviceService) TestConnectionWithCredentials(ipAddress string, creds *DeviceCredentials) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	// Validate IP address
+	if !ValidateIPAddress(ipAddress) {
+		return result, fmt.Errorf("invalid IP address: %s", ipAddress)
+	}
+
+	// Establish SSH connection
+	host := ipAddress + ":22"
+
+	var err error
+	if creds.Type == "password" {
+		_, err = s.sshClient.ConnectWithPassword(host, creds.Username, creds.Password)
+	} else {
+		_, err = s.sshClient.ConnectWithKey(host, creds.Username, creds.SSHKey, creds.SSHKeyPasswd)
+	}
+
+	if err != nil {
+		result["ssh_connection"] = false
+		result["error"] = err.Error()
+		return result, fmt.Errorf("connection failed: %w", err)
+	}
+
+	result["ssh_connection"] = true
+
+	// Check Docker installation
+	dockerInstalled, dockerVersion, err := s.validator.DockerInstalled(host)
+	result["docker_installed"] = dockerInstalled
+	if dockerInstalled {
+		result["docker_version"] = dockerVersion
+	}
+
+	// Check Docker running
+	if dockerInstalled {
+		dockerRunning, err := s.validator.DockerRunning(host)
+		result["docker_running"] = dockerRunning
+		if err != nil {
+			result["docker_error"] = err.Error()
+		}
+	}
+
+	// Check Docker Compose
+	composeInstalled, composeVersion, _ := s.validator.ValidateDockerCompose(host)
+	result["docker_compose_installed"] = composeInstalled
+	if composeInstalled {
+		result["docker_compose_version"] = composeVersion
+	}
+
+	// Get system info
+	sysInfo, err := s.validator.GetSystemInfo(host)
+	if err == nil {
+		result["system_info"] = sysInfo
+	}
+
+	return result, nil
+}
+
+// TestConnection tests SSH connection and Docker availability
+func (s *DeviceService) TestConnection(id uuid.UUID) (map[string]interface{}, error) {
+	device, err := s.GetDevice(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get credentials
+	creds, err := s.credService.GetCredentials(id.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credentials: %w", err)
+	}
+
+	// Use TestConnectionWithCredentials for the actual test
+	result, err := s.TestConnectionWithCredentials(device.IPAddress, creds)
+	if err != nil {
+		return result, err
+	}
+
+	// Update device status
+	s.UpdateDeviceStatus(id, models.DeviceStatusOnline)
+
+	return result, nil
+}
+
+// UpdateDeviceStatus updates the status and last_seen timestamp of a device
+func (s *DeviceService) UpdateDeviceStatus(id uuid.UUID, status models.DeviceStatus) error {
+	now := time.Now()
+	return s.db.Model(&models.Device{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":    status,
+		"last_seen": &now,
+	}).Error
+}
+
+// GetDeviceCredentials retrieves credentials for a device
+func (s *DeviceService) GetDeviceCredentials(id uuid.UUID) (*DeviceCredentials, error) {
+	return s.credService.GetCredentials(id.String())
+}

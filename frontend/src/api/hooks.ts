@@ -1,0 +1,119 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { apiClient } from './client'
+import type {
+  CreateDeviceRequest,
+  UpdateDeviceRequest,
+  TestConnectionRequest,
+  StartScanRequest,
+} from './types'
+
+// Query keys
+export const deviceKeys = {
+  all: ['devices'] as const,
+  lists: () => [...deviceKeys.all, 'list'] as const,
+  list: (filters: Record<string, any> = {}) =>
+    [...deviceKeys.lists(), filters] as const,
+  details: () => [...deviceKeys.all, 'detail'] as const,
+  detail: (id: string) => [...deviceKeys.details(), id] as const,
+}
+
+// Device hooks
+export function useDevices() {
+  return useQuery({
+    queryKey: deviceKeys.lists(),
+    queryFn: () => apiClient.listDevices(),
+  })
+}
+
+export function useDevice(id: string) {
+  return useQuery({
+    queryKey: deviceKeys.detail(id),
+    queryFn: () => apiClient.getDevice(id),
+    enabled: !!id,
+  })
+}
+
+export function useCreateDevice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: CreateDeviceRequest) => apiClient.createDevice(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deviceKeys.lists() })
+    },
+  })
+}
+
+export function useUpdateDevice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateDeviceRequest }) =>
+      apiClient.updateDevice(id, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: deviceKeys.detail(variables.id) })
+      queryClient.invalidateQueries({ queryKey: deviceKeys.lists() })
+    },
+  })
+}
+
+export function useDeleteDevice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteDevice(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deviceKeys.lists() })
+    },
+  })
+}
+
+export function useTestConnection() {
+  return useMutation({
+    mutationFn: (id: string) => apiClient.testConnection(id),
+  })
+}
+
+export function useTestConnectionBeforeCreate() {
+  return useMutation({
+    mutationFn: (data: TestConnectionRequest) =>
+      apiClient.testConnectionBeforeCreate(data),
+  })
+}
+
+// Scanner query keys
+export const scannerKeys = {
+  all: ['scanner'] as const,
+  scans: () => [...scannerKeys.all, 'scan'] as const,
+  scan: (id: string) => [...scannerKeys.scans(), id] as const,
+}
+
+// Scanner hooks
+export function useStartScan() {
+  return useMutation({
+    mutationFn: (data: StartScanRequest = {}) => apiClient.startScan(data),
+  })
+}
+
+export function useScanProgress(scanId: string) {
+  return useQuery({
+    queryKey: scannerKeys.scan(scanId),
+    queryFn: () => apiClient.getScanProgress(scanId),
+    enabled: !!scanId,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      // Stop polling when scan is completed or failed
+      if (data?.status === 'completed' || data?.status === 'failed') {
+        return false
+      }
+      return 1000 // Poll every second while scanning
+    },
+  })
+}
+
+export function useDetectNetwork() {
+  return useQuery({
+    queryKey: [...scannerKeys.all, 'detect-network'],
+    queryFn: () => apiClient.detectNetwork(),
+  })
+}

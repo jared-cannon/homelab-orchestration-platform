@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  /* Modern indigo/slate palette inspired by Laravel Herd */
+  --background: 210 20% 98%;  /* Slate-50 */
+  --foreground: 222.2 47.4% 11.2%;  /* Slate-900 */
+  --card: 0 0% 100%;  /* Pure white */
+  --card-foreground: 222.2 47.4% 11.2%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 47.4% 11.2%;
+  --primary: 238.7 83.5% 66.7%;  /* Indigo-500 */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214.3 31.8% 91.4%;  /* Slate-200 */
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 220 14.3% 95.9%;  /* Slate-100 */
+  --muted-foreground: 220 8.9% 46.1%;  /* Slate-600 */
+  --accent: 217.2 91.2% 59.8%;  /* Blue-500 */
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84.2% 60.2%;  /* Rose-500 */
+  --destructive-foreground: 0 0% 100%;
+  --success: 142.1 76.2% 36.3%;  /* Emerald-600 */
+  --success-foreground: 0 0% 100%;
+  --border: 214.3 31.8% 91.4%;  /* Slate-200 */
+  --input: 214.3 31.8% 91.4%;
+  --ring: 238.7 83.5% 66.7%;  /* Indigo-500 */
+  --radius: 0.75rem;  /* Larger, more modern radius */
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+}
+
+/* Base typography and spacing improvements */
+html {
+  font-size: 15px;  /* Slightly larger base font */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+}
+
+/* Smooth transitions for all interactive elements */
+button, a, [role="button"] {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Better focus rings */
+*:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}

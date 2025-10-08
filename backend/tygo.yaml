@@ -1,0 +1,14 @@
+packages:
+  - path: "github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+    type_mappings:
+      time.Time: "string"
+      uuid.UUID: "string"
+      "[]byte": "Record<string, any>"
+    output_path: "../frontend/src/api/generated-types.ts"
+    frontmatter: |
+      /* eslint-disable */
+      // @ts-nocheck
+      /**
+       * Auto-generated TypeScript types from Go models
+       * DO NOT EDIT - Run `make types` to regenerate
+       */
