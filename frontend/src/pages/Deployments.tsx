@@ -329,7 +329,7 @@ export function DeploymentsPage() {
                               onClick={() => {
                                 setSelectedLogs({
                                   name: deployment.recipe_name,
-                                  logs: deployment.deployment_logs,
+                                  logs: deployment.deployment_logs || '',
                                 })
                                 setLogsDialogOpen(true)
                               }}
