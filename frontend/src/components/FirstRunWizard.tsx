@@ -1,8 +1,13 @@
-import { Sparkles, Network, Plus } from 'lucide-react'
+import { useState } from 'react'
+import { Sparkles, Network, Plus, BookOpen, Server } from 'lucide-react'
 import { AddDeviceDialog } from './AddDeviceDialog'
 import { DeviceDiscoveryWizard } from './DeviceDiscoveryWizard'
+import { ServerSetupGuide } from './ServerSetupGuide'
+import { Button } from './ui/button'
 
 export function FirstRunWizard() {
+  const [showSetupGuide, setShowSetupGuide] = useState(false)
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted flex items-center justify-center px-4">
       <div className="max-w-3xl w-full">
@@ -23,12 +28,37 @@ export function FirstRunWizard() {
             </p>
           </div>
 
+          {/* New Server Setup Guide */}
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-500/5 border-2 border-blue-500/20 rounded-xl p-6 mb-8">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <Server className="w-6 h-6 text-blue-500" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground text-lg mb-2">
+                  Need to set up a server first?
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Don\'t have a Linux server ready? Follow our step-by-step guide to convert any computer into a server for your homelab.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowSetupGuide(true)}
+                  className="border-blue-500/30 hover:bg-blue-500/10"
+                >
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  View Server Setup Guide
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {/* Info Card */}
           <div className="bg-primary/5 border border-primary/20 rounded-xl p-6 mb-8">
             <div className="flex items-start gap-3 mb-3">
               <Network className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
               <h3 className="font-semibold text-foreground">
-                Two ways to add devices:
+                Already have a server? Add it to your homelab:
               </h3>
             </div>
             <ul className="space-y-3 text-sm text-muted-foreground ml-8">
@@ -42,6 +72,8 @@ export function FirstRunWizard() {
               </li>
             </ul>
           </div>
+
+          <ServerSetupGuide open={showSetupGuide} onOpenChange={setShowSetupGuide} />
 
           {/* Action Buttons */}
           <div className="space-y-4">

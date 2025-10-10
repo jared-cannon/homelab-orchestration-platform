@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useUpdateDeviceCredentials, useTestConnectionBeforeCreate } from '../api/hooks'
-import type { Device } from '../api/types'
+import type { Device, DeviceCredentials } from '../api/types'
 import { Button } from './ui/button'
 import {
   Dialog,
@@ -20,7 +20,7 @@ interface UpdateCredentialsDialogProps {
 }
 
 export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCredentialsDialogProps) {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<DeviceCredentials>({
     type: 'auto' as 'auto' | 'password' | 'ssh_key',
     username: '',
     password: '',
