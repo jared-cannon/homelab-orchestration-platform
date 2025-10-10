@@ -48,15 +48,29 @@ func getEncryptionKey() []byte {
 
 // NewCredentialService creates a new credential service
 func NewCredentialService() (*CredentialService, error) {
-	// Configure keyring
+	// Don't open keyring here - we'll do it lazily on first use
+	// This avoids password prompts for users relying on SSH agent
+	return &CredentialService{
+		ring:          nil, // Will be opened lazily
+		encryptionKey: getEncryptionKey(),
+	}, nil
+}
+
+// ensureRing opens the keyring if it hasn't been opened yet
+func (s *CredentialService) ensureRing() error {
+	if s.ring != nil {
+		return nil // Already open
+	}
+
+	// Configure and open keyring
 	ring, err := keyring.Open(keyring.Config{
 		ServiceName: "homelab-orchestration-platform",
 		// Try OS keychain first, fallback to encrypted file if unavailable
 		AllowedBackends: []keyring.BackendType{
-			keyring.KeychainBackend,  // macOS Keychain
+			keyring.KeychainBackend,      // macOS Keychain
 			keyring.SecretServiceBackend, // Linux Secret Service (gnome-keyring, kwallet)
-			keyring.WinCredBackend, // Windows Credential Manager
-			keyring.FileBackend,    // Encrypted file fallback
+			keyring.WinCredBackend,       // Windows Credential Manager
+			keyring.FileBackend,          // Encrypted file fallback
 		},
 		// For file backend (fallback)
 		FileDir: "~/.homelab",
@@ -68,18 +82,29 @@ func NewCredentialService() (*CredentialService, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to open keyring: %w", err)
+		return fmt.Errorf("failed to open keyring: %w", err)
 	}
 
-	return &CredentialService{
-		ring:          ring,
-		encryptionKey: getEncryptionKey(),
-	}, nil
+	s.ring = ring
+	return nil
 }
 
 // StoreCredentials stores device credentials securely in the OS keychain
 // deviceName and deviceIP are optional - used for a more descriptive keychain label
+// For "auto" type credentials (SSH agent), this is a no-op since username is stored in DB
 func (s *CredentialService) StoreCredentials(deviceID string, creds *DeviceCredentials, deviceName, deviceIP string) error {
+	// For "auto" type credentials (SSH agent), we don't need to store anything in the keychain
+	// The username is stored in the Device table, and SSH will use the agent or default keys
+	if creds.Type == "auto" {
+		return nil // Nothing to store
+	}
+
+	// For password and SSH key auth, use the secure keychain
+	// Ensure keyring is open
+	if err := s.ensureRing(); err != nil {
+		return err
+	}
+
 	// Marshal credentials to JSON
 	data, err := json.Marshal(creds)
 	if err != nil {
@@ -112,12 +137,19 @@ func (s *CredentialService) StoreCredentials(deviceID string, creds *DeviceCrede
 }
 
 // GetCredentials retrieves device credentials from the OS keychain
+// For "auto" type credentials, returns nil (credentials are in Device table)
 func (s *CredentialService) GetCredentials(deviceID string) (*DeviceCredentials, error) {
+	// Ensure keyring is open
+	if err := s.ensureRing(); err != nil {
+		return nil, err
+	}
+
 	// Retrieve from keyring
 	item, err := s.ring.Get(deviceID)
 	if err != nil {
 		if err == keyring.ErrKeyNotFound {
-			return nil, fmt.Errorf("credentials not found for device: %s", deviceID)
+			// Not in keychain - might be "auto" type (stored in Device table)
+			return nil, keyring.ErrKeyNotFound
 		}
 		return nil, fmt.Errorf("failed to retrieve credentials: %w", err)
 	}
@@ -205,10 +237,17 @@ func (s *CredentialService) DecryptData(encrypted string) (string, error) {
 }
 
 // DeleteCredentials removes device credentials from the OS keychain
+// For "auto" type credentials (not in keychain), this is a no-op
 func (s *CredentialService) DeleteCredentials(deviceID string) error {
+	// Try to open keyring, but if it fails, that's okay for auto credentials
+	if err := s.ensureRing(); err != nil {
+		// If keyring can't be opened, assume it's an auto credential
+		return nil
+	}
+
 	if err := s.ring.Remove(deviceID); err != nil {
 		if err == keyring.ErrKeyNotFound {
-			// Already deleted, not an error
+			// Not in keychain (probably "auto" type), not an error
 			return nil
 		}
 		// File backend may return "no such file" error instead of ErrKeyNotFound

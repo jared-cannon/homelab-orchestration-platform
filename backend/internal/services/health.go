@@ -103,8 +103,8 @@ func (h *HealthCheckService) checkDeviceHealth(deviceID uuid.UUID) {
 
 	// If no existing connection, create a new one
 	if err != nil {
-		// Get credentials only when needed for new connection
-		creds, credErr := h.credService.GetCredentials(deviceID.String())
+		// Use DeviceService to get credentials (handles both DB and keychain sources)
+		creds, credErr := h.deviceService.GetDeviceCredentials(deviceID)
 		if credErr != nil {
 			log.Printf("[HealthCheck] Failed to get credentials for %s: %v", device.Name, credErr)
 			h.updateDeviceStatus(deviceID, models.DeviceStatusError)

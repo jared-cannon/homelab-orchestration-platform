@@ -46,13 +46,20 @@ func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredent
 		device.ID = uuid.New()
 	}
 
-	// Store credentials in keychain with device name and IP for better UX
+	// Set username and auth type from credentials (stored in DB, not sensitive)
+	device.Username = creds.Username
+	device.AuthType = models.AuthType(creds.Type)
+
+	// Store secrets in keychain (only for password/ssh_key types)
+	// For "auto" type, this is a no-op since no secrets to store
 	if err := s.credService.StoreCredentials(device.ID.String(), creds, device.Name, device.IPAddress); err != nil {
 		return fmt.Errorf("failed to store credentials: %w", err)
 	}
 
-	// Set credential key reference
-	device.CredentialKey = device.ID.String()
+	// Set credential key reference (only used for password/ssh_key types)
+	if creds.Type == "password" || creds.Type == "ssh_key" {
+		device.CredentialKey = device.ID.String()
+	}
 
 	// Create device in database
 	if err := s.db.Create(device).Error; err != nil {
@@ -216,6 +223,47 @@ func (s *DeviceService) UpdateDeviceStatus(id uuid.UUID, status models.DeviceSta
 
 // GetDeviceCredentials retrieves credentials for a device
 func (s *DeviceService) GetDeviceCredentials(id uuid.UUID) (*DeviceCredentials, error) {
+	// Get device to check auth type
+	device, err := s.GetDevice(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Migration path: if username is empty, this is a legacy device - try to get from keychain and migrate
+	if device.Username == "" {
+		fmt.Printf("[DeviceService] Migrating legacy device %s - retrieving credentials from keychain\n", device.Name)
+		creds, err := s.credService.GetCredentials(id.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to migrate credentials: %w", err)
+		}
+
+		// Update device with username and auth_type for future use
+		updates := map[string]interface{}{
+			"username":  creds.Username,
+			"auth_type": models.AuthType(creds.Type),
+		}
+		if creds.Type == "password" || creds.Type == "ssh_key" {
+			updates["credential_key"] = id.String()
+		}
+
+		if err := s.db.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			fmt.Printf("[DeviceService] Warning: failed to migrate device metadata: %v\n", err)
+		} else {
+			fmt.Printf("[DeviceService] Successfully migrated device %s to new credential system\n", device.Name)
+		}
+
+		return creds, nil
+	}
+
+	// For "auto" type, construct credentials from device table
+	if device.AuthType == models.AuthTypeAuto {
+		return &DeviceCredentials{
+			Type:     "auto",
+			Username: device.Username,
+		}, nil
+	}
+
+	// For password/ssh_key types, retrieve from keychain
 	return s.credService.GetCredentials(id.String())
 }
 
@@ -235,7 +283,25 @@ func (s *DeviceService) UpdateDeviceCredentials(id uuid.UUID, creds *DeviceCrede
 		}
 	}
 
-	// Update credentials in keychain
+	// Update username and auth type in device table
+	updates := map[string]interface{}{
+		"username":  creds.Username,
+		"auth_type": models.AuthType(creds.Type),
+	}
+
+	// Update credential key reference (only for password/ssh_key types)
+	if creds.Type == "password" || creds.Type == "ssh_key" {
+		updates["credential_key"] = id.String()
+	} else {
+		updates["credential_key"] = "" // Clear for "auto" type
+	}
+
+	if err := s.db.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update device credentials metadata: %w", err)
+	}
+
+	// Update secrets in keychain (only for password/ssh_key types)
+	// For "auto" type, this is a no-op
 	if err := s.credService.StoreCredentials(id.String(), creds, device.Name, device.IPAddress); err != nil {
 		return fmt.Errorf("failed to update credentials: %w", err)
 	}

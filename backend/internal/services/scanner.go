@@ -37,15 +37,23 @@ type DiscoveredDevice struct {
 
 // ScanProgress represents the current state of a network scan
 type ScanProgress struct {
-	ID              string              `json:"id"`
-	Status          string              `json:"status"` // "scanning", "completed", "failed"
-	TotalHosts      int                 `json:"total_hosts"`
-	ScannedHosts    int                 `json:"scanned_hosts"`
-	DiscoveredCount int                 `json:"discovered_count"`
-	Devices         []DiscoveredDevice  `json:"devices"`
-	Error           string              `json:"error,omitempty"`
-	StartedAt       time.Time           `json:"started_at"`
-	CompletedAt     *time.Time          `json:"completed_at,omitempty"`
+	ID              string             `json:"id"`
+	Status          string             `json:"status"` // "scanning", "completed", "failed"
+	Phase           string             `json:"phase"`  // "ping", "ssh_scan", "credential_test", "completed"
+	TotalHosts      int                `json:"total_hosts"`
+	ScannedHosts    int                `json:"scanned_hosts"`
+	DiscoveredCount int                `json:"discovered_count"`
+	CurrentIP       string             `json:"current_ip,omitempty"`
+	ScanRate        float64            `json:"scan_rate"` // IPs per second
+	Devices         []DiscoveredDevice `json:"devices"`
+	Error           string             `json:"error,omitempty"`
+	StartedAt       time.Time          `json:"started_at"`
+	CompletedAt     *time.Time         `json:"completed_at,omitempty"`
+}
+
+// WebSocketHub interface for broadcasting messages (avoids circular dependency)
+type WebSocketHub interface {
+	Broadcast(channel string, event string, data interface{})
 }
 
 // ScannerService handles network device discovery
@@ -54,6 +62,7 @@ type ScannerService struct {
 	validator       *ValidatorService
 	credMatcher     *CredentialMatcher
 	db              *gorm.DB
+	wsHub           WebSocketHub
 	scans           map[string]*ScanProgress
 	cancelFuncs     map[string]context.CancelFunc
 	mu              sync.RWMutex
@@ -64,12 +73,13 @@ type ScannerService struct {
 }
 
 // NewScannerService creates a new scanner service
-func NewScannerService(db *gorm.DB, sshClient *ssh.Client, credMatcher *CredentialMatcher) *ScannerService {
+func NewScannerService(db *gorm.DB, sshClient *ssh.Client, credMatcher *CredentialMatcher, wsHub WebSocketHub) *ScannerService {
 	s := &ScannerService{
 		db:              db,
 		sshClient:       sshClient,
 		validator:       NewValidatorService(sshClient),
 		credMatcher:     credMatcher,
+		wsHub:           wsHub,
 		scans:           make(map[string]*ScanProgress),
 		cancelFuncs:     make(map[string]context.CancelFunc),
 		maxConcurrent:   3,                   // Max 3 concurrent scans
@@ -231,13 +241,18 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 
 	s.mu.Lock()
 	progress := s.scans[scanID]
+	progress.Phase = "ping"
 	s.mu.Unlock()
+
+	// Broadcast initial scan start
+	s.broadcastProgress(scanID)
 
 	// Get list of IPs to scan
 	ips, err := s.generateIPList(cidr)
 	if err != nil {
 		log.Printf("[Scanner] Error generating IP list: %v", err)
 		s.updateScanError(scanID, err.Error())
+		s.broadcastProgress(scanID)
 		return
 	}
 
@@ -284,6 +299,14 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 	log.Printf("[Scanner] Combined discovery found %d unique active hosts (ping: %d, mDNS: %d), now scanning for SSH and services",
 		len(activeHosts), len(pingHosts), len(mdnsHosts))
 
+	// Update phase to SSH scanning
+	s.mu.Lock()
+	progress.Phase = "ssh_scan"
+	progress.ScannedHosts = 0 // Reset for SSH scan phase
+	progress.TotalHosts = len(activeHosts)
+	s.mu.Unlock()
+	s.broadcastProgress(scanID)
+
 	// Scan each active host for SSH and Docker
 	var wg sync.WaitGroup
 	deviceChan := make(chan DiscoveredDevice, len(activeHosts))
@@ -302,6 +325,12 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
 
+				// Update current IP being scanned
+				s.mu.Lock()
+				progress.CurrentIP = ipAddr
+				s.mu.Unlock()
+				s.broadcastProgress(scanID)
+
 				device := s.scanHost(ipAddr)
 				if device != nil {
 					deviceChan <- *device
@@ -310,6 +339,7 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 				s.mu.Lock()
 				progress.ScannedHosts++
 				s.mu.Unlock()
+				s.broadcastProgress(scanID)
 			}
 		}(ip)
 	}
@@ -326,14 +356,22 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 		progress.Devices = append(progress.Devices, device)
 		progress.DiscoveredCount = len(progress.Devices)
 		s.mu.Unlock()
+
+		// Broadcast when new device is discovered
+		s.broadcastProgress(scanID)
 	}
 
 	// Mark scan as completed
 	now := time.Now()
 	s.mu.Lock()
 	progress.Status = "completed"
+	progress.Phase = "completed"
+	progress.CurrentIP = ""
 	progress.CompletedAt = &now
 	s.mu.Unlock()
+
+	// Broadcast final completion
+	s.broadcastProgress(scanID)
 }
 
 // scanHost checks a single host for SSH availability, services, and credentials
@@ -699,6 +737,30 @@ func (s *ScannerService) updateScanError(scanID, errMsg string) {
 		now := time.Now()
 		progress.CompletedAt = &now
 	}
+}
+
+// broadcastProgress sends real-time scan progress via WebSocket
+func (s *ScannerService) broadcastProgress(scanID string) {
+	if s.wsHub == nil {
+		return
+	}
+
+	s.mu.RLock()
+	progress, exists := s.scans[scanID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	// Calculate scan rate (IPs per second)
+	elapsed := time.Since(progress.StartedAt).Seconds()
+	if elapsed > 0 {
+		progress.ScanRate = float64(progress.ScannedHosts) / elapsed
+	}
+
+	// Broadcast to scanner channel
+	s.wsHub.Broadcast("scanner", "scan:progress", progress)
 }
 
 // DetectLocalNetwork attempts to detect the local network CIDR

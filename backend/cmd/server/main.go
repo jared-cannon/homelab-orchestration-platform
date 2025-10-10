@@ -85,11 +85,20 @@ func main() {
 	sshClient := ssh.NewClient()
 	credMatcher := services.NewCredentialMatcher(db, credService, sshClient)
 	deviceService := services.NewDeviceService(db, credService, sshClient)
-	scannerService := services.NewScannerService(db, sshClient, credMatcher)
 	userService := services.NewUserService(db)
 
+	// Initialize WebSocket hub (needed for scanner)
+	wsHub := websocket.NewHub()
+	go wsHub.Run()
+	log.Printf("🔌 WebSocket hub initialized")
+
+	scannerService := services.NewScannerService(db, sshClient, credMatcher, wsHub)
+
+	// Initialize software registry
+	softwareRegistry := services.NewSoftwareRegistry("./software-definitions")
+
 	// Initialize software and infrastructure services
-	softwareService := services.NewSoftwareService(db, sshClient)
+	softwareService := services.NewSoftwareService(db, sshClient, softwareRegistry)
 	nfsService := services.NewNFSService(db, sshClient, softwareService)
 	volumeService := services.NewVolumeService(db, sshClient, softwareService)
 
@@ -97,11 +106,6 @@ func main() {
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
 	healthCheckService.SetDeviceService(deviceService)
 	log.Printf("🔧 Services initialized")
-
-	// Initialize WebSocket hub
-	wsHub := websocket.NewHub()
-	go wsHub.Run()
-	log.Printf("🔌 WebSocket hub initialized")
 
 	// Start health check service
 	healthCtx := context.Background()
@@ -181,7 +185,12 @@ func main() {
 	devices.Get("/software", softwareHandler.ListInstalled)
 	devices.Post("/software", softwareHandler.InstallSoftware)
 	devices.Post("/software/detect", softwareHandler.DetectInstalled)
+	devices.Get("/software/updates", softwareHandler.CheckUpdates)
+	devices.Post("/software/:name/update", softwareHandler.UpdateSoftware)
 	devices.Delete("/software/:name", softwareHandler.UninstallSoftware)
+
+	// Global software routes (available software catalog)
+	protectedGroup.Get("/software/available", softwareHandler.ListAvailable)
 
 	// NFS server routes
 	devices.Post("/nfs/server/setup", nfsHandler.SetupServer)

@@ -78,9 +78,12 @@ export interface DiscoveredDevice {
 export interface ScanProgress {
   id: string
   status: 'scanning' | 'completed' | 'failed'
+  phase?: 'ping' | 'ssh_scan' | 'credential_test' | 'completed' // Current phase of the scan
   total_hosts: number
   scanned_hosts: number
   discovered_count: number
+  current_ip?: string // IP currently being scanned
+  scan_rate?: number // IPs per second
   devices: DiscoveredDevice[]
   error?: string
   started_at: string
@@ -185,4 +188,13 @@ export interface CreateVolumeRequest {
   nfs_server_ip?: string
   nfs_path?: string
   options?: Record<string, string>
+}
+
+// Software update types
+export interface SoftwareUpdateInfo {
+  software_id: string
+  current_version: string
+  available_version?: string
+  update_available: boolean
+  message?: string
 }

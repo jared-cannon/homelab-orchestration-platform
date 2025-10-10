@@ -27,6 +27,15 @@ const (
 	DeviceStatusUnknown DeviceStatus = "unknown"
 )
 
+// AuthType represents the authentication method for SSH
+type AuthType string
+
+const (
+	AuthTypeAuto     AuthType = "auto"     // SSH agent or default keys
+	AuthTypePassword AuthType = "password" // Password authentication
+	AuthTypeSSHKey   AuthType = "ssh_key"  // SSH key authentication
+)
+
 // Device represents a managed device (server, router, NAS, etc.)
 type Device struct {
 	ID            uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
@@ -35,7 +44,9 @@ type Device struct {
 	IPAddress     string       `gorm:"not null;uniqueIndex" json:"ip_address"`
 	MACAddress    string       `json:"mac_address,omitempty"`
 	Status        DeviceStatus `gorm:"default:unknown" json:"status"`
-	CredentialKey string       `gorm:"not null" json:"-"` // Reference to credential in keychain, never expose in JSON
+	Username      string       `gorm:"default:''" json:"username"`              // SSH username (not sensitive)
+	AuthType      AuthType     `gorm:"default:auto" json:"auth_type"`           // Authentication method
+	CredentialKey string       `json:"-"`                                       // Reference to credential in keychain (only for password/ssh_key), never expose in JSON
 	Metadata      []byte       `gorm:"type:json" json:"metadata,omitempty"`
 	LastSeen      *time.Time   `json:"last_seen,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`

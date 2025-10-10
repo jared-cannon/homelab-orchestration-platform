@@ -1,11 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { apiClient } from './client'
+import { wsService } from '../services/websocket'
 import type {
   CreateDeviceRequest,
   UpdateDeviceRequest,
   UpdateCredentialsRequest,
   TestConnectionRequest,
   StartScanRequest,
+  ScanProgress,
 } from './types'
 
 // Query keys
@@ -110,6 +113,30 @@ export function useStartScan() {
 }
 
 export function useScanProgress(scanId: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time scan progress
+  useEffect(() => {
+    if (!scanId) return
+
+    const handleScanProgress = (event: string, data: unknown) => {
+      if (event === 'scan:progress') {
+        const progress = data as ScanProgress
+        // Only update if this is our scan
+        if (progress.id === scanId) {
+          queryClient.setQueryData(scannerKeys.scan(scanId), progress)
+        }
+      }
+    }
+
+    // Subscribe to scanner channel
+    const unsubscribe = wsService.on('scanner', handleScanProgress)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [scanId, queryClient])
+
   return useQuery({
     queryKey: scannerKeys.scan(scanId),
     queryFn: () => apiClient.getScanProgress(scanId),
@@ -120,7 +147,8 @@ export function useScanProgress(scanId: string) {
       if (data?.status === 'completed' || data?.status === 'failed') {
         return false
       }
-      return 1000 // Poll every second while scanning
+      // Reduce polling frequency to every 5 seconds as fallback (WebSocket is primary)
+      return 5000
     },
   })
 }

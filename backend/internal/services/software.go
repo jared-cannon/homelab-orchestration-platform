@@ -15,13 +15,15 @@ import (
 type SoftwareService struct {
 	db        *gorm.DB
 	sshClient *ssh.Client
+	registry  *SoftwareRegistry
 }
 
 // NewSoftwareService creates a new software service
-func NewSoftwareService(db *gorm.DB, sshClient *ssh.Client) *SoftwareService {
+func NewSoftwareService(db *gorm.DB, sshClient *ssh.Client, registry *SoftwareRegistry) *SoftwareService {
 	return &SoftwareService{
 		db:        db,
 		sshClient: sshClient,
+		registry:  registry,
 	}
 }
 
@@ -325,6 +327,232 @@ func (s *SoftwareService) DetectInstalled(deviceID uuid.UUID) ([]models.Installe
 	log.Printf("[Software] Detection complete on %s: found %d installed packages", device.Name, len(detected))
 
 	return detected, nil
+}
+
+// CheckUpdates checks for available updates for installed software
+func (s *SoftwareService) CheckUpdates(deviceID uuid.UUID) ([]models.SoftwareUpdateInfo, error) {
+	device, err := s.getDevice(deviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	host := device.IPAddress + ":22"
+
+	// Get installed software
+	var installedSoftware []models.InstalledSoftware
+	if err := s.db.Where("device_id = ?", deviceID).Find(&installedSoftware).Error; err != nil {
+		return nil, fmt.Errorf("failed to get installed software: %w", err)
+	}
+
+	log.Printf("[Software] Checking updates for %d packages on %s", len(installedSoftware), device.Name)
+
+	var updateInfo []models.SoftwareUpdateInfo
+
+	for _, software := range installedSoftware {
+		// Get software definition
+		def, err := s.registry.GetDefinition(string(software.Name))
+		if err != nil {
+			log.Printf("[Software] Warning: no definition for %s, skipping update check", software.Name)
+			continue
+		}
+
+		// Check for updates using the definition's check_updates command
+		if def.Commands.CheckUpdates == "" {
+			log.Printf("[Software] No update check command for %s, skipping", software.Name)
+			continue
+		}
+
+		output, err := s.sshClient.Execute(host, def.Commands.CheckUpdates)
+		updateAvailable := err == nil && strings.TrimSpace(output) != ""
+
+		info := models.SoftwareUpdateInfo{
+			SoftwareID:      string(software.Name),
+			CurrentVersion:  software.Version,
+			UpdateAvailable: updateAvailable,
+		}
+
+		if updateAvailable {
+			info.Message = strings.TrimSpace(output)
+			log.Printf("[Software] Update available for %s on %s", software.Name, device.Name)
+		}
+
+		updateInfo = append(updateInfo, info)
+	}
+
+	log.Printf("[Software] Update check complete on %s: %d packages checked", device.Name, len(updateInfo))
+	return updateInfo, nil
+}
+
+// UpdateSoftware updates a specific software package to the latest version
+func (s *SoftwareService) UpdateSoftware(deviceID uuid.UUID, softwareName models.SoftwareType) (*models.InstalledSoftware, error) {
+	device, err := s.getDevice(deviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	host := device.IPAddress + ":22"
+
+	// Get software definition
+	def, err := s.registry.GetDefinition(string(softwareName))
+	if err != nil {
+		return nil, fmt.Errorf("software definition not found: %w", err)
+	}
+
+	// Check if software is installed
+	var existing models.InstalledSoftware
+	if err := s.db.Where("device_id = ? AND name = ?", deviceID, softwareName).First(&existing).Error; err != nil {
+		return nil, fmt.Errorf("software not installed")
+	}
+
+	log.Printf("[Software] Updating %s on %s", softwareName, device.Name)
+
+	// Run update command
+	if def.Commands.Update == "" {
+		return nil, fmt.Errorf("no update command defined for %s", softwareName)
+	}
+
+	_, err = s.sshClient.Execute(host, def.Commands.Update)
+	if err != nil {
+		return nil, fmt.Errorf("update failed: %w", err)
+	}
+
+	// Get new version
+	newVersion := ""
+	if def.Commands.CheckVersion != "" {
+		versionOutput, err := s.sshClient.Execute(host, def.Commands.CheckVersion)
+		if err == nil {
+			newVersion = strings.TrimSpace(versionOutput)
+		}
+	}
+
+	// Update database record
+	if newVersion != "" && newVersion != existing.Version {
+		existing.Version = newVersion
+		s.db.Save(&existing)
+		log.Printf("[Software] Updated %s from %s to %s", softwareName, existing.Version, newVersion)
+	}
+
+	log.Printf("[Software] Update complete for %s on %s", softwareName, device.Name)
+	return &existing, nil
+}
+
+// Install installs software using the plugin system (registry-based)
+func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.SoftwareType, options map[string]interface{}) (*models.InstalledSoftware, error) {
+	device, err := s.getDevice(deviceID)
+	if err != nil {
+		return nil, err
+	}
+
+	host := device.IPAddress + ":22"
+
+	// Get software definition from registry
+	def, err := s.registry.GetDefinition(string(softwareName))
+	if err != nil {
+		return nil, fmt.Errorf("software definition not found: %w", err)
+	}
+
+	// Check if already installed
+	if def.Commands.CheckInstalled != "" {
+		output, err := s.sshClient.Execute(host, def.Commands.CheckInstalled)
+		if err == nil && strings.TrimSpace(output) != "" {
+			log.Printf("[Software] %s already installed on %s", def.Name, device.Name)
+
+			// Return existing record or create one
+			var existing models.InstalledSoftware
+			err := s.db.Where("device_id = ? AND name = ?", deviceID, softwareName).First(&existing).Error
+			if err == nil {
+				return &existing, nil
+			}
+
+			// Get version
+			version := strings.TrimSpace(output)
+			if def.Commands.CheckVersion != "" {
+				versionOutput, err := s.sshClient.Execute(host, def.Commands.CheckVersion)
+				if err == nil {
+					version = strings.TrimSpace(versionOutput)
+				}
+			}
+
+			// Create record for existing installation
+			software := &models.InstalledSoftware{
+				DeviceID:    deviceID,
+				Name:        softwareName,
+				Version:     version,
+				InstalledBy: "detected",
+			}
+			if err := s.db.Create(software).Error; err != nil {
+				return nil, fmt.Errorf("failed to record software: %w", err)
+			}
+			return software, nil
+		}
+	}
+
+	log.Printf("[Software] Installing %s on %s using plugin system", def.Name, device.Name)
+
+	// Check for passwordless sudo if install command contains sudo
+	if strings.Contains(def.Commands.Install, "sudo") {
+		log.Printf("[Software] Checking passwordless sudo access...")
+		_, testErr := s.sshClient.Execute(host, "sudo -n true")
+		if testErr != nil {
+			log.Printf("[Software] Passwordless sudo check failed: %v", testErr)
+			return nil, models.NewSudoError(device.IPAddress)
+		}
+		log.Printf("[Software] Passwordless sudo confirmed")
+	}
+
+	// Run install command
+	if def.Commands.Install == "" {
+		return nil, fmt.Errorf("no install command defined for %s", softwareName)
+	}
+
+	log.Printf("[Software] Running install command: %s", def.Commands.Install)
+	output, err := s.sshClient.Execute(host, def.Commands.Install)
+	if err != nil {
+		log.Printf("[Software] Install command failed. Output: %s", output)
+		log.Printf("[Software] Install command error: %v", err)
+		return nil, fmt.Errorf("installation failed: %w (output: %s)", err, output)
+	}
+	log.Printf("[Software] Install command succeeded. Output: %s", output)
+
+	// Run post-install hook if defined
+	if def.Commands.PostInstall != "" {
+		log.Printf("[Software] Running post-install hook for %s", def.Name)
+		_, err = s.sshClient.Execute(host, def.Commands.PostInstall)
+		if err != nil {
+			log.Printf("[Software] Warning: post-install hook failed: %v", err)
+			// Don't fail the installation if post-install fails
+		}
+	}
+
+	// Get version
+	version := ""
+	if def.Commands.CheckVersion != "" {
+		versionOutput, err := s.sshClient.Execute(host, def.Commands.CheckVersion)
+		if err == nil {
+			version = strings.TrimSpace(versionOutput)
+		}
+	}
+
+	log.Printf("[Software] %s installed successfully: %s", def.Name, version)
+
+	// Record installation
+	software := &models.InstalledSoftware{
+		DeviceID:    deviceID,
+		Name:        softwareName,
+		Version:     version,
+		InstalledBy: "system",
+	}
+
+	if err := s.db.Create(software).Error; err != nil {
+		return nil, fmt.Errorf("failed to record software: %w", err)
+	}
+
+	return software, nil
+}
+
+// ListAvailableSoftware returns all software definitions from the registry
+func (s *SoftwareService) ListAvailableSoftware() []*models.SoftwareDefinition {
+	return s.registry.ListDefinitions()
 }
 
 // Uninstall removes software from a device

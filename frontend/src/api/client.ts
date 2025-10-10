@@ -17,10 +17,24 @@ import type {
   MountNFSShareRequest,
   Volume,
   CreateVolumeRequest,
+  SoftwareUpdateInfo,
 } from './types'
 import { useAuthStore } from '../stores/authStore'
 
 const API_BASE_URL = '/api/v1'
+
+// Structured API Error
+export class APIError extends Error {
+  code?: string
+  details?: Record<string, any>
+
+  constructor(message: string, code?: string, details?: Record<string, any>) {
+    super(message)
+    this.name = 'APIError'
+    this.code = code
+    this.details = details
+  }
+}
 
 class APIClient {
   private async request<T>(
@@ -55,8 +69,12 @@ class APIClient {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error(error.error || `HTTP ${response.status}`)
+      const errorData = await response.json().catch(() => ({}))
+      throw new APIError(
+        errorData.error || `HTTP ${response.status}`,
+        errorData.code,
+        errorData.details
+      )
     }
 
     if (response.status === 204) {
@@ -166,6 +184,16 @@ class APIClient {
   async uninstallSoftware(deviceId: string, name: string): Promise<void> {
     return this.request<void>(`/devices/${deviceId}/software/${name}`, {
       method: 'DELETE',
+    })
+  }
+
+  async checkSoftwareUpdates(deviceId: string): Promise<SoftwareUpdateInfo[]> {
+    return this.request<SoftwareUpdateInfo[]>(`/devices/${deviceId}/software/updates`)
+  }
+
+  async updateSoftware(deviceId: string, name: string): Promise<InstalledSoftware> {
+    return this.request<InstalledSoftware>(`/devices/${deviceId}/software/${name}/update`, {
+      method: 'POST',
     })
   }
 

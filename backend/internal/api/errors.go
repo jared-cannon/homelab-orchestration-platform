@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
 )
 
 // Global validator instance
@@ -13,8 +14,9 @@ var validate = validator.New()
 
 // ErrorResponse represents a sanitized error response for API clients
 type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message,omitempty"`
+	Error   string                 `json:"error"`
+	Code    string                 `json:"code,omitempty"`
+	Details map[string]interface{} `json:"details,omitempty"`
 }
 
 // sanitizeError returns a user-friendly error message and logs the detailed error
@@ -84,6 +86,16 @@ func sanitizeError(err error, userMessage string) string {
 
 // HandleError is a helper to return sanitized error responses
 func HandleError(c *fiber.Ctx, statusCode int, err error, defaultMessage string) error {
+	// Check if this is a structured APIError
+	if apiErr, ok := err.(*models.APIError); ok {
+		return c.Status(statusCode).JSON(ErrorResponse{
+			Error:   apiErr.Message,
+			Code:    apiErr.Code,
+			Details: apiErr.Details,
+		})
+	}
+
+	// Otherwise sanitize the error
 	sanitized := sanitizeError(err, defaultMessage)
 	return c.Status(statusCode).JSON(ErrorResponse{
 		Error: sanitized,

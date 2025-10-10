@@ -167,7 +167,20 @@ export function DeviceDiscoveryWizard() {
             {/* Progress bar */}
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span>Scanning network...</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">
+                    {scanProgress.phase === 'ping' && 'Discovering hosts...'}
+                    {scanProgress.phase === 'ssh_scan' && 'Scanning for SSH...'}
+                    {scanProgress.phase === 'credential_test' && 'Testing credentials...'}
+                    {scanProgress.phase === 'completed' && 'Scan complete'}
+                    {!scanProgress.phase && 'Scanning network...'}
+                  </span>
+                  {scanProgress.scan_rate && scanProgress.scan_rate > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      ({scanProgress.scan_rate.toFixed(1)} IPs/s)
+                    </span>
+                  )}
+                </div>
                 <span className="text-muted-foreground">
                   {scanProgress.scanned_hosts}/{scanProgress.total_hosts}
                 </span>
@@ -183,6 +196,11 @@ export function DeviceDiscoveryWizard() {
                   }}
                 />
               </div>
+              {scanProgress.current_ip && (
+                <p className="text-xs text-muted-foreground">
+                  Currently scanning: {scanProgress.current_ip}
+                </p>
+              )}
             </div>
 
             {/* Found devices count */}

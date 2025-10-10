@@ -1,0 +1,25 @@
+id: docker
+name: Docker Engine
+description: Container runtime platform for building and running applications
+category: container
+icon: docker
+
+commands:
+  check_installed: "docker --version 2>/dev/null"
+  check_version: "docker --version 2>/dev/null | awk '{print $3}' | sed 's/,//'"
+  check_updates: "apt list --upgradable 2>/dev/null | grep -E '^docker-ce/|^containerd.io/'"
+
+  install: |
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh &&
+    sudo sh /tmp/get-docker.sh &&
+    rm /tmp/get-docker.sh
+
+  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y docker-ce docker-ce-cli containerd.io"
+
+  post_install: |
+    sudo systemctl start docker &&
+    sudo systemctl enable docker
+
+options:
+  add_user_to_group: "true"
+  user_group_command: "sudo usermod -aG docker $USER"

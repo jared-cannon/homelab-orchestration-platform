@@ -1,0 +1,14 @@
+id: nfs-client
+name: NFS Client
+description: Network File System client for mounting remote NFS shares
+category: storage
+icon: folder-sync
+
+commands:
+  check_installed: "dpkg -l | grep nfs-common"
+  check_version: "dpkg -l | grep nfs-common | awk '{print $3}'"
+  check_updates: "apt list --upgradable 2>/dev/null | grep '^nfs-common/'"
+
+  install: "sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-common"
+
+  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y nfs-common"

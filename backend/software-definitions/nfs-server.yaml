@@ -1,0 +1,18 @@
+id: nfs-server
+name: NFS Server
+description: Network File System server for sharing directories over the network
+category: storage
+icon: hard-drive
+
+commands:
+  check_installed: "systemctl is-active nfs-kernel-server 2>/dev/null"
+  check_version: "dpkg -l | grep nfs-kernel-server | awk '{print $3}'"
+  check_updates: "apt list --upgradable 2>/dev/null | grep '^nfs-kernel-server/'"
+
+  install: "sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nfs-kernel-server"
+
+  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y nfs-kernel-server"
+
+  post_install: |
+    sudo systemctl start nfs-kernel-server &&
+    sudo systemctl enable nfs-kernel-server

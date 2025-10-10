@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info } from 'lucide-react'
+import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info, ArrowUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card } from './ui/card'
-import { apiClient } from '../api/client'
+import { apiClient, APIError } from '../api/client'
 import type {
   InstallSoftwareRequest,
   SoftwareType,
   CreateVolumeRequest,
   VolumeType,
+  SoftwareUpdateInfo,
 } from '../api/types'
 
 interface DeviceManagementProps {
@@ -86,6 +87,7 @@ export function DeviceManagement({ deviceId }: DeviceManagementProps) {
 function SoftwareTab({ deviceId }: { deviceId: string }) {
   const queryClient = useQueryClient()
   const [installing, setInstalling] = useState(false)
+  const [sudoError, setSudoError] = useState<{ deviceIp: string; fixSteps: string[] } | null>(null)
 
   const { data: software = [], isLoading } = useQuery({
     queryKey: ['software', deviceId],
@@ -107,8 +109,45 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
     },
   })
 
+  const checkUpdatesMutation = useMutation({
+    mutationFn: () => apiClient.checkSoftwareUpdates(deviceId),
+    onSuccess: (updates) => {
+      const availableUpdates = updates.filter(u => u.update_available)
+      if (availableUpdates.length > 0) {
+        toast.success(`${availableUpdates.length} update(s) available`, {
+          description: availableUpdates.map(u => u.software_id).join(', ')
+        })
+        setUpdateInfo(updates)
+      } else {
+        toast.info('All software is up to date')
+        setUpdateInfo([])
+      }
+    },
+    onError: (error: Error) => {
+      toast.error('Update check failed', { description: error.message })
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: (name: string) => apiClient.updateSoftware(deviceId, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['software', deviceId] })
+      toast.success('Software updated successfully')
+      setUpdateInfo([])
+    },
+    onError: (error: Error) => {
+      toast.error('Update failed', { description: error.message })
+    },
+  })
+
+  const [updateInfo, setUpdateInfo] = useState<SoftwareUpdateInfo[]>([])
+
   const handleRefresh = () => {
     detectMutation.mutate()
+  }
+
+  const handleCheckUpdates = () => {
+    checkUpdatesMutation.mutate()
   }
 
   const installMutation = useMutation({
@@ -118,9 +157,17 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
       queryClient.invalidateQueries({ queryKey: ['software', deviceId] })
       toast.success('Software installed successfully')
       setInstalling(false)
+      setSudoError(null)
     },
     onError: (error: Error) => {
-      toast.error('Installation failed', { description: error.message })
+      if (error instanceof APIError && error.code === 'SUDO_NOT_CONFIGURED') {
+        setSudoError({
+          deviceIp: error.details?.device_ip || '',
+          fixSteps: error.details?.fix_steps || []
+        })
+      } else {
+        toast.error('Installation failed', { description: error.message })
+      }
       setInstalling(false)
     },
   })
@@ -154,18 +201,54 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Sudo Configuration Alert */}
+      {sudoError && (
+        <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+          <div className="flex items-start gap-3">
+            <Info className="w-5 h-5 text-orange-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <h4 className="font-semibold text-orange-500 mb-2">Passwordless Sudo Required</h4>
+              <p className="text-sm text-foreground mb-3">
+                Automated software installation requires passwordless sudo on <code className="px-1 py-0.5 bg-muted rounded text-xs font-mono">{sudoError.deviceIp}</code>
+              </p>
+              <div className="space-y-2 text-sm">
+                <p className="font-medium">Steps to fix:</p>
+                <ol className="list-decimal list-inside space-y-1 text-muted-foreground ml-2">
+                  {sudoError.fixSteps.map((step, i) => (
+                    <li key={i} className="leading-relaxed">
+                      {step.includes('ALL=(ALL)') ? (
+                        <code className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono ml-1">{step.trim()}</code>
+                      ) : step.includes('sudo visudo') || step.includes('sudo apt-get') ? (
+                        <><code className="px-1.5 py-0.5 bg-muted rounded text-xs font-mono ml-1">{step.split(':')[1]?.trim() || step.trim()}</code></>
+                      ) : (
+                        <span className="ml-1">{step}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <button
+                onClick={() => setSudoError(null)}
+                className="mt-3 px-3 py-1 text-sm bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Installed Software */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-muted-foreground">Installed Software</h3>
           <div className="flex gap-2">
             <button
-              onClick={() => toast.info('Update checking coming soon', {
-                description: 'This feature will check for available package updates'
-              })}
-              className="px-3 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+              onClick={handleCheckUpdates}
+              disabled={checkUpdatesMutation.isPending || software.length === 0}
+              className="px-3 py-1 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
-              Check for Updates
+              {checkUpdatesMutation.isPending ? 'Checking...' : 'Check for Updates'}
             </button>
             <button
               onClick={handleRefresh}
@@ -188,22 +271,36 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
         ) : (
           <>
             <div className="space-y-2 mb-3">
-              {software.map((s) => (
-                <div
-                  key={s.id}
-                  className="flex items-center justify-between p-3 bg-card border border-border rounded-lg"
-                >
-                  <div>
-                    <p className="font-medium capitalize">{s.name.replace('-', ' ')}</p>
-                    <p className="text-sm text-muted-foreground">{s.version}</p>
+              {software.map((s) => {
+                const hasUpdate = updateInfo.find(u => u.software_id === s.name)?.update_available
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between p-3 bg-card border border-border rounded-lg"
+                  >
+                    <div>
+                      <p className="font-medium capitalize">{s.name.replace('-', ' ')}</p>
+                      <p className="text-sm text-muted-foreground">{s.version}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasUpdate ? (
+                        <button
+                          onClick={() => updateMutation.mutate(s.name)}
+                          disabled={updateMutation.isPending}
+                          className="px-3 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50 transition-colors flex items-center gap-1"
+                        >
+                          <ArrowUp className="w-3 h-3" />
+                          Update Available
+                        </button>
+                      ) : (
+                        <span className="px-2 py-1 text-xs rounded-full bg-green-500/10 text-green-500">
+                          Up to date
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 text-xs rounded-full bg-green-500/10 text-green-500">
-                      Installed
-                    </span>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div className="flex items-start gap-2 p-3 bg-muted/50 rounded-lg">
               <Info className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />

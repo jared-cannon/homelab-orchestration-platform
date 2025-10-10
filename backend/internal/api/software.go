@@ -61,21 +61,14 @@ func (h *SoftwareHandler) InstallSoftware(c *fiber.Ctx) error {
 		return err
 	}
 
-	var software *models.InstalledSoftware
-
-	switch req.SoftwareType {
-	case models.SoftwareDocker:
-		software, err = h.service.InstallDocker(deviceID, req.AddUserToGroup)
-	case models.SoftwareNFSServer:
-		software, err = h.service.InstallNFSServer(deviceID)
-	case models.SoftwareNFSClient:
-		software, err = h.service.InstallNFSClient(deviceID)
-	default:
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Unsupported software type",
-		})
+	// Build options map from request
+	options := make(map[string]interface{})
+	if req.AddUserToGroup {
+		options["add_user_to_group"] = true
 	}
 
+	// Use plugin-based installation system
+	software, err := h.service.Install(deviceID, req.SoftwareType, options)
 	if err != nil {
 		return HandleError(c, 500, err, "Failed to install software")
 	}
@@ -116,6 +109,48 @@ func (h *SoftwareHandler) DetectInstalled(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(software)
+}
+
+// CheckUpdates handles GET /api/v1/devices/:id/software/updates
+func (h *SoftwareHandler) CheckUpdates(c *fiber.Ctx) error {
+	deviceID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid device ID",
+		})
+	}
+
+	updates, err := h.service.CheckUpdates(deviceID)
+	if err != nil {
+		return HandleError(c, 500, err, "Failed to check for updates")
+	}
+
+	return c.JSON(updates)
+}
+
+// UpdateSoftware handles POST /api/v1/devices/:id/software/:name/update
+func (h *SoftwareHandler) UpdateSoftware(c *fiber.Ctx) error {
+	deviceID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid device ID",
+		})
+	}
+
+	softwareName := models.SoftwareType(c.Params("name"))
+
+	software, err := h.service.UpdateSoftware(deviceID, softwareName)
+	if err != nil {
+		return HandleError(c, 500, err, "Failed to update software")
+	}
+
+	return c.JSON(software)
+}
+
+// ListAvailable handles GET /api/v1/software/available
+func (h *SoftwareHandler) ListAvailable(c *fiber.Ctx) error {
+	definitions := h.service.ListAvailableSoftware()
+	return c.JSON(definitions)
 }
 
 // RegisterRoutes registers all software routes
