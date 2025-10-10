@@ -46,8 +46,8 @@ func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredent
 		device.ID = uuid.New()
 	}
 
-	// Store credentials in keychain
-	if err := s.credService.StoreCredentials(device.ID.String(), creds); err != nil {
+	// Store credentials in keychain with device name and IP for better UX
+	if err := s.credService.StoreCredentials(device.ID.String(), creds, device.Name, device.IPAddress); err != nil {
 		return fmt.Errorf("failed to store credentials: %w", err)
 	}
 
@@ -102,9 +102,11 @@ func (s *DeviceService) DeleteDevice(id uuid.UUID) error {
 	}
 
 	// Close SSH connection if any
-	device, err := s.GetDevice(id)
-	if err == nil {
-		s.sshClient.Close(device.IPAddress + ":22")
+	if s.sshClient != nil {
+		device, err := s.GetDevice(id)
+		if err == nil {
+			s.sshClient.Close(device.IPAddress + ":22")
+		}
 	}
 
 	// Delete device from database
@@ -130,8 +132,12 @@ func (s *DeviceService) TestConnectionWithCredentials(ipAddress string, creds *D
 	var err error
 	if creds.Type == "password" {
 		_, err = s.sshClient.ConnectWithPassword(host, creds.Username, creds.Password)
-	} else {
+	} else if creds.Type == "ssh_key" {
 		_, err = s.sshClient.ConnectWithKey(host, creds.Username, creds.SSHKey, creds.SSHKeyPasswd)
+	} else if creds.Type == "auto" {
+		_, err = s.sshClient.TryAutoAuth(host, creds.Username)
+	} else {
+		return result, fmt.Errorf("unknown credential type: %s", creds.Type)
 	}
 
 	if err != nil {
@@ -211,4 +217,28 @@ func (s *DeviceService) UpdateDeviceStatus(id uuid.UUID, status models.DeviceSta
 // GetDeviceCredentials retrieves credentials for a device
 func (s *DeviceService) GetDeviceCredentials(id uuid.UUID) (*DeviceCredentials, error) {
 	return s.credService.GetCredentials(id.String())
+}
+
+// UpdateDeviceCredentials updates credentials for an existing device
+func (s *DeviceService) UpdateDeviceCredentials(id uuid.UUID, creds *DeviceCredentials) error {
+	// Verify device exists
+	device, err := s.GetDevice(id)
+	if err != nil {
+		return err
+	}
+
+	// Close existing SSH connection to force reconnection with new credentials
+	if s.sshClient != nil {
+		host := device.IPAddress + ":22"
+		if err := s.sshClient.Close(host); err == nil {
+			fmt.Printf("[DeviceService] Closed existing SSH connection to %s after credential update\n", device.Name)
+		}
+	}
+
+	// Update credentials in keychain
+	if err := s.credService.StoreCredentials(id.String(), creds, device.Name, device.IPAddress); err != nil {
+		return fmt.Errorf("failed to update credentials: %w", err)
+	}
+
+	return nil
 }

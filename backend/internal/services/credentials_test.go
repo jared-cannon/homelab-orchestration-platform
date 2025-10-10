@@ -42,7 +42,10 @@ func setupCredService(t *testing.T) *CredentialService {
 	})
 	assert.NoError(t, err, "Failed to create test keyring")
 
-	return &CredentialService{ring: ring}
+	return &CredentialService{
+		ring:          ring,
+		encryptionKey: getEncryptionKey(),
+	}
 }
 
 func TestCredentialService_PasswordAuth(t *testing.T) {
@@ -57,7 +60,7 @@ func TestCredentialService_PasswordAuth(t *testing.T) {
 		}
 
 		// Store credentials
-		err := credService.StoreCredentials(deviceID, creds)
+		err := credService.StoreCredentials(deviceID, creds, "", "")
 		assert.NoError(t, err, "Should store credentials successfully")
 
 		// Retrieve credentials
@@ -75,7 +78,7 @@ func TestCredentialService_PasswordAuth(t *testing.T) {
 			Username: "admin",
 			Password: "oldpassword",
 		}
-		err := credService.StoreCredentials(deviceID, creds1)
+		err := credService.StoreCredentials(deviceID, creds1, "", "")
 		assert.NoError(t, err)
 
 		// Update with new credentials
@@ -84,7 +87,7 @@ func TestCredentialService_PasswordAuth(t *testing.T) {
 			Username: "root",
 			Password: "newpassword",
 		}
-		err = credService.StoreCredentials(deviceID, creds2)
+		err = credService.StoreCredentials(deviceID, creds2, "", "")
 		assert.NoError(t, err, "Should update credentials")
 
 		// Retrieve and verify updated credentials
@@ -113,7 +116,7 @@ func TestCredentialService_SSHKeyAuth(t *testing.T) {
 		}
 
 		// Store credentials
-		err := credService.StoreCredentials(deviceID, creds)
+		err := credService.StoreCredentials(deviceID, creds, "", "")
 		assert.NoError(t, err, "Should store SSH key credentials")
 
 		// Retrieve credentials
@@ -132,7 +135,7 @@ func TestCredentialService_SSHKeyAuth(t *testing.T) {
 			SSHKey:   "-----BEGIN PRIVATE KEY-----\ntest-key\n-----END PRIVATE KEY-----",
 		}
 
-		err := credService.StoreCredentials(deviceID, creds)
+		err := credService.StoreCredentials(deviceID, creds, "", "")
 		assert.NoError(t, err)
 
 		retrieved, err := credService.GetCredentials(deviceID)
@@ -158,7 +161,7 @@ func TestCredentialService_DeleteCredentials(t *testing.T) {
 			Username: "admin",
 			Password: "password",
 		}
-		err := credService.StoreCredentials(deviceID, creds)
+		err := credService.StoreCredentials(deviceID, creds, "", "")
 		assert.NoError(t, err)
 
 		// Delete credentials
@@ -200,7 +203,7 @@ func TestCredentialService_TestCredentials(t *testing.T) {
 			Username: "admin",
 			Password: "password",
 		}
-		err := credService.StoreCredentials(deviceID, creds)
+		err := credService.StoreCredentials(deviceID, creds, "", "")
 		assert.NoError(t, err)
 
 		// Test credentials exist
@@ -259,7 +262,7 @@ func TestCredentialService_MultipleDevices(t *testing.T) {
 
 		// Store all credentials
 		for _, d := range devices {
-			err := credService.StoreCredentials(d.id, d.creds)
+			err := credService.StoreCredentials(d.id, d.creds, "", "")
 			assert.NoError(t, err, "Should store credentials for device %s", d.id)
 		}
 
@@ -274,5 +277,97 @@ func TestCredentialService_MultipleDevices(t *testing.T) {
 		for _, d := range devices {
 			credService.DeleteCredentials(d.id)
 		}
+	})
+}
+
+func TestCredentialService_AutoAuth(t *testing.T) {
+	credService := setupCredService(t)
+	deviceID := uuid.New().String()
+
+	t.Run("Store and retrieve auto auth credentials", func(t *testing.T) {
+		creds := &DeviceCredentials{
+			Type:     "auto",
+			Username: "admin",
+		}
+
+		// Store credentials
+		err := credService.StoreCredentials(deviceID, creds, "Test Server", "192.168.1.100")
+		assert.NoError(t, err, "Should store auto auth credentials")
+
+		// Retrieve credentials
+		retrieved, err := credService.GetCredentials(deviceID)
+		assert.NoError(t, err, "Should retrieve auto auth credentials")
+		assert.Equal(t, "auto", retrieved.Type, "Type should be auto")
+		assert.Equal(t, "admin", retrieved.Username, "Username should match")
+		assert.Empty(t, retrieved.Password, "Password should be empty for auto auth")
+		assert.Empty(t, retrieved.SSHKey, "SSH key should be empty for auto auth")
+		assert.Empty(t, retrieved.SSHKeyPasswd, "SSH key passphrase should be empty for auto auth")
+	})
+
+	// Cleanup
+	t.Cleanup(func() {
+		credService.DeleteCredentials(deviceID)
+	})
+}
+
+func TestCredentialService_Encryption(t *testing.T) {
+	credService := setupCredService(t)
+
+	t.Run("Encrypt and decrypt data successfully", func(t *testing.T) {
+		testData := "my-super-secret-password-123"
+
+		// Encrypt
+		encrypted, err := credService.EncryptData(testData)
+		assert.NoError(t, err, "Should encrypt data successfully")
+		assert.NotEmpty(t, encrypted, "Encrypted data should not be empty")
+		assert.NotEqual(t, testData, encrypted, "Encrypted data should not match plaintext")
+
+		// Decrypt
+		decrypted, err := credService.DecryptData(encrypted)
+		assert.NoError(t, err, "Should decrypt data successfully")
+		assert.Equal(t, testData, decrypted, "Decrypted data should match original")
+	})
+
+	t.Run("Handle empty strings", func(t *testing.T) {
+		encrypted, err := credService.EncryptData("")
+		assert.NoError(t, err, "Should handle empty string encryption")
+		assert.Equal(t, "", encrypted, "Empty string should remain empty")
+
+		decrypted, err := credService.DecryptData("")
+		assert.NoError(t, err, "Should handle empty string decryption")
+		assert.Equal(t, "", decrypted, "Empty string should remain empty")
+	})
+
+	t.Run("Encryption produces different ciphertexts", func(t *testing.T) {
+		testData := "same-data-encrypted-twice"
+
+		// Encrypt twice
+		encrypted1, err := credService.EncryptData(testData)
+		assert.NoError(t, err)
+
+		encrypted2, err := credService.EncryptData(testData)
+		assert.NoError(t, err)
+
+		// Should produce different ciphertexts due to random nonce
+		assert.NotEqual(t, encrypted1, encrypted2, "Encrypting same data twice should produce different ciphertexts")
+
+		// But both should decrypt to same value
+		decrypted1, err := credService.DecryptData(encrypted1)
+		assert.NoError(t, err)
+		assert.Equal(t, testData, decrypted1)
+
+		decrypted2, err := credService.DecryptData(encrypted2)
+		assert.NoError(t, err)
+		assert.Equal(t, testData, decrypted2)
+	})
+
+	t.Run("Decryption fails with invalid data", func(t *testing.T) {
+		// Invalid base64
+		_, err := credService.DecryptData("not-valid-base64!@#$")
+		assert.Error(t, err, "Should fail with invalid base64")
+
+		// Valid base64 but invalid ciphertext
+		_, err = credService.DecryptData("YWJjZGVmZ2hpams=")
+		assert.Error(t, err, "Should fail with invalid ciphertext")
 	})
 }

@@ -3,9 +3,9 @@ package services
 import (
 	"testing"
 
+	"github.com/99designs/keyring"
 	"github.com/google/uuid"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
 	"github.com/stretchr/testify/assert"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -25,17 +25,27 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 // setupTestCredentialService creates a credential service with file backend for testing
 func setupTestCredentialService(t *testing.T) *CredentialService {
-	// Use file backend for testing to avoid OS keychain dependencies
-	credService, err := NewCredentialService()
-	assert.NoError(t, err, "Failed to create credential service")
-	return credService
+	// Use file backend only for testing to avoid OS keychain dependencies
+	ring, err := keyring.Open(keyring.Config{
+		ServiceName: "homelab-test",
+		AllowedBackends: []keyring.BackendType{
+			keyring.FileBackend, // File backend only for tests
+		},
+		FileDir: t.TempDir(), // Use temporary directory
+		FilePasswordFunc: func(prompt string) (string, error) {
+			return "test-password", nil
+		},
+	})
+	assert.NoError(t, err, "Failed to open test keyring")
+
+	return &CredentialService{ring: ring}
 }
 
 func TestDeviceService_CreateDevice(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	sshClient := ssh.NewClient()
-	deviceService := NewDeviceService(db, credService, sshClient)
+	// Use nil SSH client for tests
+	deviceService := NewDeviceService(db, credService, nil)
 
 	t.Run("Creates device with valid data", func(t *testing.T) {
 		device := &models.Device{
@@ -123,13 +133,38 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		assert.Equal(t, creds.Username, retrievedCreds.Username)
 		assert.Equal(t, creds.SSHKey, retrievedCreds.SSHKey)
 	})
+
+	t.Run("Creates device with auto authentication type", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Auto Auth Test",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "192.168.1.108",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "auto",
+			Username: "admin",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err, "Should create device with auto auth")
+		assert.NotEqual(t, uuid.Nil, device.ID, "Should generate UUID")
+
+		// Retrieve credentials
+		retrievedCreds, err := deviceService.GetDeviceCredentials(device.ID)
+		assert.NoError(t, err, "Should retrieve credentials")
+		assert.Equal(t, "auto", retrievedCreds.Type)
+		assert.Equal(t, "admin", retrievedCreds.Username)
+		assert.Empty(t, retrievedCreds.Password, "Password should be empty for auto auth")
+		assert.Empty(t, retrievedCreds.SSHKey, "SSH key should be empty for auto auth")
+	})
 }
 
 func TestDeviceService_GetDevice(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	sshClient := ssh.NewClient()
-	deviceService := NewDeviceService(db, credService, sshClient)
+	// Use nil SSH client for tests
+	deviceService := NewDeviceService(db, credService, nil)
 
 	t.Run("Returns device by ID", func(t *testing.T) {
 		// Create device
@@ -165,8 +200,8 @@ func TestDeviceService_GetDevice(t *testing.T) {
 func TestDeviceService_ListDevices(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	sshClient := ssh.NewClient()
-	deviceService := NewDeviceService(db, credService, sshClient)
+	// Use nil SSH client for tests
+	deviceService := NewDeviceService(db, credService, nil)
 
 	t.Run("Returns empty list when no devices", func(t *testing.T) {
 		devices, err := deviceService.ListDevices()
@@ -208,8 +243,8 @@ func TestDeviceService_ListDevices(t *testing.T) {
 func TestDeviceService_UpdateDevice(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	sshClient := ssh.NewClient()
-	deviceService := NewDeviceService(db, credService, sshClient)
+	// Use nil SSH client for tests
+	deviceService := NewDeviceService(db, credService, nil)
 
 	t.Run("Updates device fields", func(t *testing.T) {
 		// Create device
@@ -243,8 +278,8 @@ func TestDeviceService_UpdateDevice(t *testing.T) {
 func TestDeviceService_DeleteDevice(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	sshClient := ssh.NewClient()
-	deviceService := NewDeviceService(db, credService, sshClient)
+	// Use nil SSH client for tests
+	deviceService := NewDeviceService(db, credService, nil)
 
 	t.Run("Deletes device and credentials", func(t *testing.T) {
 		// Create device

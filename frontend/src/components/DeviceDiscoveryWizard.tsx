@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Wifi, Server, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { Wifi, Server, CheckCircle2, Loader2 } from 'lucide-react'
 import { useStartScan, useScanProgress, useCreateDevice } from '../api/hooks'
-import type { DiscoveredDevice, DeviceCredentials } from '../api/types'
+import type { DeviceCredentials } from '../api/types'
 import { Button } from './ui/button'
 import {
   Dialog,

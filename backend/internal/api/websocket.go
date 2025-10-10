@@ -1,6 +1,8 @@
 package api
 
 import (
+	"log"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	ws "github.com/jaredcannon/homelab-orchestration-platform/internal/websocket"
@@ -18,8 +20,16 @@ func NewWebSocketHandler(hub *ws.Hub) *WebSocketHandler {
 
 // HandleConnection handles WebSocket connections
 func (h *WebSocketHandler) HandleConnection(c *websocket.Conn) {
+	log.Printf("[WebSocket] New connection from %s", c.RemoteAddr())
 	client := ws.NewClient(h.hub, c)
 	client.Start()
+	log.Printf("[WebSocket] Client started, waiting for connection to close...")
+
+	// Block until the client connection is closed
+	// This prevents Fiber from closing the connection prematurely
+	client.Wait()
+
+	log.Printf("[WebSocket] Connection closed for %s", c.RemoteAddr())
 }
 
 // RegisterRoutes registers WebSocket routes

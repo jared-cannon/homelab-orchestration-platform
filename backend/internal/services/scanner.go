@@ -3,16 +3,19 @@ package services
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
-	"os/exec"
-	"regexp"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-ping/ping"
 	"github.com/google/uuid"
+	"github.com/grandcat/zeroconf"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
+	"github.com/mdlayher/arp"
 	"gorm.io/gorm"
 )
 
@@ -47,27 +50,103 @@ type ScanProgress struct {
 
 // ScannerService handles network device discovery
 type ScannerService struct {
-	sshClient   *ssh.Client
-	validator   *ValidatorService
-	credMatcher *CredentialMatcher
-	db          *gorm.DB
-	scans       map[string]*ScanProgress
-	mu          sync.RWMutex
+	sshClient       *ssh.Client
+	validator       *ValidatorService
+	credMatcher     *CredentialMatcher
+	db              *gorm.DB
+	scans           map[string]*ScanProgress
+	cancelFuncs     map[string]context.CancelFunc
+	mu              sync.RWMutex
+	maxConcurrent   int
+	scanExpiry      time.Duration
+	cleanupInterval time.Duration
+	shutdownChan    chan struct{}
 }
 
 // NewScannerService creates a new scanner service
 func NewScannerService(db *gorm.DB, sshClient *ssh.Client, credMatcher *CredentialMatcher) *ScannerService {
-	return &ScannerService{
-		db:          db,
-		sshClient:   sshClient,
-		validator:   NewValidatorService(sshClient),
-		credMatcher: credMatcher,
-		scans:       make(map[string]*ScanProgress),
+	s := &ScannerService{
+		db:              db,
+		sshClient:       sshClient,
+		validator:       NewValidatorService(sshClient),
+		credMatcher:     credMatcher,
+		scans:           make(map[string]*ScanProgress),
+		cancelFuncs:     make(map[string]context.CancelFunc),
+		maxConcurrent:   3,                   // Max 3 concurrent scans
+		scanExpiry:      30 * time.Minute,    // Scans expire after 30 minutes
+		cleanupInterval: 5 * time.Minute,     // Cleanup every 5 minutes
+		shutdownChan:    make(chan struct{}),
+	}
+
+	// Start cleanup goroutine
+	go s.cleanupExpiredScans()
+
+	return s
+}
+
+// Shutdown gracefully stops the scanner service
+func (s *ScannerService) Shutdown() {
+	close(s.shutdownChan)
+
+	// Cancel all active scans
+	s.mu.Lock()
+	for scanID, cancel := range s.cancelFuncs {
+		cancel()
+		if progress, exists := s.scans[scanID]; exists {
+			progress.Status = "cancelled"
+			now := time.Now()
+			progress.CompletedAt = &now
+		}
+	}
+	s.mu.Unlock()
+}
+
+// cleanupExpiredScans periodically removes expired scans from memory
+func (s *ScannerService) cleanupExpiredScans() {
+	ticker := time.NewTicker(s.cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.shutdownChan:
+			log.Printf("[Scanner] Cleanup goroutine stopping")
+			return
+		case <-ticker.C:
+			now := time.Now()
+			s.mu.Lock()
+
+			for scanID, progress := range s.scans {
+				// Remove completed scans older than expiry time
+				if progress.Status == "completed" || progress.Status == "failed" || progress.Status == "cancelled" {
+					if progress.CompletedAt != nil && now.Sub(*progress.CompletedAt) > s.scanExpiry {
+						log.Printf("[Scanner] Cleaning up expired scan %s", scanID)
+						delete(s.scans, scanID)
+						delete(s.cancelFuncs, scanID)
+					}
+				}
+			}
+
+			s.mu.Unlock()
+		}
 	}
 }
 
 // StartScan initiates a network scan and returns a scan ID
 func (s *ScannerService) StartScan(ctx context.Context, cidr string) (string, error) {
+	// Check if we're at max concurrent scans
+	s.mu.RLock()
+	activeScans := 0
+	for _, progress := range s.scans {
+		if progress.Status == "scanning" {
+			activeScans++
+		}
+	}
+	s.mu.RUnlock()
+
+	if activeScans >= s.maxConcurrent {
+		return "", fmt.Errorf("maximum concurrent scans (%d) reached, please wait for existing scans to complete", s.maxConcurrent)
+	}
+
 	scanID := uuid.New().String()
 
 	// Parse CIDR to determine total hosts
@@ -87,14 +166,50 @@ func (s *ScannerService) StartScan(ctx context.Context, cidr string) (string, er
 		StartedAt:  time.Now(),
 	}
 
+	// Create cancelable context for this scan
+	scanCtx, cancel := context.WithCancel(ctx)
+
 	s.mu.Lock()
 	s.scans[scanID] = progress
+	s.cancelFuncs[scanID] = cancel
 	s.mu.Unlock()
 
 	// Start scanning in background
-	go s.performScan(ctx, scanID, cidr)
+	go s.performScan(scanCtx, scanID, cidr)
 
 	return scanID, nil
+}
+
+// CancelScan cancels a running scan
+func (s *ScannerService) CancelScan(scanID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cancel, exists := s.cancelFuncs[scanID]
+	if !exists {
+		return fmt.Errorf("scan not found")
+	}
+
+	progress, exists := s.scans[scanID]
+	if !exists {
+		return fmt.Errorf("scan not found")
+	}
+
+	if progress.Status != "scanning" {
+		return fmt.Errorf("scan is not running")
+	}
+
+	// Cancel the context
+	cancel()
+
+	// Mark as cancelled
+	progress.Status = "cancelled"
+	now := time.Now()
+	progress.CompletedAt = &now
+
+	log.Printf("[Scanner] Cancelled scan %s", scanID)
+
+	return nil
 }
 
 // GetScanProgress retrieves the current progress of a scan
@@ -112,6 +227,8 @@ func (s *ScannerService) GetScanProgress(scanID string) (*ScanProgress, error) {
 
 // performScan executes the actual network scanning
 func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
+	log.Printf("[Scanner] Starting scan %s for CIDR %s", scanID, cidr)
+
 	s.mu.Lock()
 	progress := s.scans[scanID]
 	s.mu.Unlock()
@@ -119,12 +236,53 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 	// Get list of IPs to scan
 	ips, err := s.generateIPList(cidr)
 	if err != nil {
+		log.Printf("[Scanner] Error generating IP list: %v", err)
 		s.updateScanError(scanID, err.Error())
 		return
 	}
 
-	// Use ARP scan to find active hosts quickly
-	activeHosts := s.scanWithARP(ips)
+	log.Printf("[Scanner] Generated %d IPs to scan", len(ips))
+
+	// Run both ping-based and mDNS discovery in parallel
+	var pingHosts, mdnsHosts []string
+	var discoveryWg sync.WaitGroup
+
+	// Start ping scan
+	discoveryWg.Add(1)
+	go func() {
+		defer discoveryWg.Done()
+		pingHosts = s.scanWithARP(ips)
+		log.Printf("[Scanner] Ping scan found %d active hosts", len(pingHosts))
+	}()
+
+	// Start mDNS discovery
+	discoveryWg.Add(1)
+	go func() {
+		defer discoveryWg.Done()
+		mdnsHosts = s.scanWithMDNS(ctx, 5*time.Second)
+		log.Printf("[Scanner] mDNS scan found %d hosts", len(mdnsHosts))
+	}()
+
+	// Wait for both discovery methods to complete
+	discoveryWg.Wait()
+
+	// Combine and deduplicate results
+	hostMap := make(map[string]bool)
+	for _, host := range pingHosts {
+		hostMap[host] = true
+	}
+	for _, host := range mdnsHosts {
+		hostMap[host] = true
+	}
+
+	// Convert back to slice
+	var activeHosts []string
+	for host := range hostMap {
+		activeHosts = append(activeHosts, host)
+	}
+
+	log.Printf("[Scanner] Combined discovery found %d unique active hosts (ping: %d, mDNS: %d), now scanning for SSH and services",
+		len(activeHosts), len(pingHosts), len(mdnsHosts))
 
 	// Scan each active host for SSH and Docker
 	var wg sync.WaitGroup
@@ -180,10 +338,15 @@ func (s *ScannerService) performScan(ctx context.Context, scanID, cidr string) {
 
 // scanHost checks a single host for SSH availability, services, and credentials
 func (s *ScannerService) scanHost(ip string) *DiscoveredDevice {
+	log.Printf("[Scanner] Scanning host %s for SSH and services", ip)
+
 	// Check if SSH port is open
 	if !s.isPortOpen(ip, 22, 2*time.Second) {
+		log.Printf("[Scanner] Host %s does not have SSH port open", ip)
 		return nil
 	}
+
+	log.Printf("[Scanner] Host %s has SSH port open", ip)
 
 	device := &DiscoveredDevice{
 		IPAddress:        ip,
@@ -430,30 +593,64 @@ func (s *ScannerService) generateSmartName(device *DiscoveredDevice) string {
 	}
 }
 
-// scanWithARP uses ARP to quickly find active hosts on the network
+// scanWithARP uses concurrent ICMP ping to quickly find active hosts on the network
 func (s *ScannerService) scanWithARP(ips []string) []string {
-	var activeHosts []string
+	log.Printf("[Scanner] Starting concurrent ping scan for %d IPs", len(ips))
 
-	// Try using arp-scan if available (requires sudo on most systems)
-	// Fall back to ping if arp-scan is not available
-	for _, ip := range ips {
-		if s.isPingReachable(ip) {
-			activeHosts = append(activeHosts, ip)
+	var activeHosts []string
+	var mu sync.Mutex
+
+	// Ping hosts concurrently in batches
+	batchSize := 50 // Scan 50 IPs at a time
+	for i := 0; i < len(ips); i += batchSize {
+		end := i + batchSize
+		if end > len(ips) {
+			end = len(ips)
 		}
+
+		batch := ips[i:end]
+		var wg sync.WaitGroup
+
+		for _, ip := range batch {
+			wg.Add(1)
+			go func(ipAddr string) {
+				defer wg.Done()
+
+				if s.isPingReachableGoPing(ipAddr) {
+					log.Printf("[Scanner] Host %s is reachable", ipAddr)
+					mu.Lock()
+					activeHosts = append(activeHosts, ipAddr)
+					mu.Unlock()
+				}
+			}(ip)
+		}
+
+		wg.Wait()
 	}
 
+	log.Printf("[Scanner] Ping scan complete. Found %d active hosts", len(activeHosts))
 	return activeHosts
 }
 
-// isPingReachable checks if a host responds to ping
-func (s *ScannerService) isPingReachable(ip string) bool {
-	// Use ping with a short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
+// isPingReachableGoPing checks if a host responds to ICMP ping using go-ping library
+func (s *ScannerService) isPingReachableGoPing(ip string) bool {
+	pinger, err := ping.NewPinger(ip)
+	if err != nil {
+		return false
+	}
 
-	cmd := exec.CommandContext(ctx, "ping", "-c", "1", "-W", "1", ip)
-	err := cmd.Run()
-	return err == nil
+	// Use unprivileged mode (UDP) to avoid requiring sudo
+	pinger.SetPrivileged(false)
+	pinger.Count = 1
+	pinger.Timeout = 2 * time.Second
+
+	err = pinger.Run()
+	if err != nil {
+		return false
+	}
+
+	stats := pinger.Statistics()
+	return stats.PacketsRecv > 0
 }
 
 // generateIPList generates a list of IPs from a CIDR range
@@ -587,25 +784,178 @@ func (s *ScannerService) isDeviceAlreadyAdded(ipAddress, macAddress string) bool
 	return false
 }
 
-// GetMACAddress attempts to get the MAC address for an IP using ARP
-func (s *ScannerService) GetMACAddress(ip string) (string, error) {
-	// Try to get MAC from ARP table
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+// GetMACAddress attempts to get the MAC address for an IP using ARP protocol
+func (s *ScannerService) GetMACAddress(ipStr string) (string, error) {
+	targetIP := net.ParseIP(ipStr)
+	if targetIP == nil {
+		return "", fmt.Errorf("invalid IP address")
+	}
 
-	cmd := exec.CommandContext(ctx, "arp", "-n", ip)
-	output, err := cmd.Output()
+	// ARP only works with IPv4
+	if targetIP.To4() == nil {
+		return "", fmt.Errorf("invalid IP address")
+	}
+
+	// Get all network interfaces
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get interfaces: %w", err)
 	}
 
-	// Parse ARP output to extract MAC address
-	// Format varies by OS, but typically contains MAC in format XX:XX:XX:XX:XX:XX
-	macRegex := regexp.MustCompile(`([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2})`)
-	matches := macRegex.FindString(string(output))
-	if matches == "" {
-		return "", fmt.Errorf("MAC address not found")
+	// Try each interface that might be on the same network
+	for _, iface := range ifaces {
+		// Skip loopback and down interfaces
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok || ipNet.IP.To4() == nil {
+				continue
+			}
+
+			// Check if target IP is in this subnet
+			if !ipNet.Contains(targetIP) {
+				continue
+			}
+
+			// Try ARP request on this interface
+			mac, err := s.sendARPRequest(&iface, targetIP)
+			if err == nil {
+				return mac.String(), nil
+			}
+		}
 	}
 
-	return matches, nil
+	return "", fmt.Errorf("MAC address not found via ARP")
+}
+
+// sendARPRequest sends an ARP request and returns the MAC address
+func (s *ScannerService) sendARPRequest(iface *net.Interface, targetIP net.IP) (net.HardwareAddr, error) {
+	client, err := arp.Dial(iface)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ARP client: %w", err)
+	}
+	defer client.Close()
+
+	// Convert net.IP to netip.Addr (required by mdlayher/arp library)
+	targetAddr, ok := netip.AddrFromSlice(targetIP.To4())
+	if !ok {
+		return nil, fmt.Errorf("invalid IPv4 address")
+	}
+
+	// Set read deadline
+	client.SetDeadline(time.Now().Add(2 * time.Second))
+
+	// Send ARP request
+	if err := client.Request(targetAddr); err != nil {
+		return nil, fmt.Errorf("ARP request failed: %w", err)
+	}
+
+	// Try to receive response (multiple attempts as responses might be delayed)
+	for i := 0; i < 3; i++ {
+		packet, _, err := client.Read()
+		if err != nil {
+			if i == 2 {
+				return nil, fmt.Errorf("no ARP response: %w", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		// Check if this is a reply for our target IP
+		if packet.Operation == arp.OperationReply && packet.SenderIP.Compare(targetAddr) == 0 {
+			return packet.SenderHardwareAddr, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no matching ARP response received")
+}
+
+// scanWithMDNS discovers devices advertising services via mDNS/Bonjour
+func (s *ScannerService) scanWithMDNS(ctx context.Context, timeout time.Duration) []string {
+	log.Printf("[Scanner] Starting mDNS discovery scan (timeout: %v)", timeout)
+
+	// Services to discover - common homelab services
+	services := []string{
+		"_ssh._tcp",         // SSH servers
+		"_sftp-ssh._tcp",    // SFTP over SSH
+		"_http._tcp",        // HTTP servers
+		"_https._tcp",       // HTTPS servers
+		"_smb._tcp",         // Samba/Windows file sharing
+		"_afpovertcp._tcp",  // AFP (Apple File Protocol)
+		"_workstation._tcp", // Network workstations
+		"_device-info._tcp", // Device information
+	}
+
+	discoveredIPs := make(map[string]bool)
+	var mu sync.Mutex
+
+	var wg sync.WaitGroup
+	for _, service := range services {
+		wg.Add(1)
+		go func(svc string) {
+			defer wg.Done()
+
+			// Create resolver
+			resolver, err := zeroconf.NewResolver(nil)
+			if err != nil {
+				log.Printf("[Scanner] Failed to create mDNS resolver for %s: %v", svc, err)
+				return
+			}
+
+			// Channel to receive service entries
+			entries := make(chan *zeroconf.ServiceEntry, 100)
+
+			// Browse for the service
+			browseCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			err = resolver.Browse(browseCtx, svc, "local.", entries)
+			if err != nil {
+				log.Printf("[Scanner] mDNS browse failed for %s: %v", svc, err)
+				return
+			}
+
+			// Collect discovered IPs
+			go func() {
+				for entry := range entries {
+					if entry == nil {
+						continue
+					}
+
+					// Log discovery
+					log.Printf("[Scanner] mDNS found: %s (%s) on %v",
+						entry.Instance, svc, entry.AddrIPv4)
+
+					// Add all IPv4 addresses
+					for _, ip := range entry.AddrIPv4 {
+						ipStr := ip.String()
+						mu.Lock()
+						discoveredIPs[ipStr] = true
+						mu.Unlock()
+					}
+				}
+			}()
+
+			<-browseCtx.Done()
+		}(service)
+	}
+
+	wg.Wait()
+
+	// Convert map to slice
+	var ips []string
+	for ip := range discoveredIPs {
+		ips = append(ips, ip)
+	}
+
+	log.Printf("[Scanner] mDNS discovery complete. Found %d unique IPs", len(ips))
+	return ips
 }

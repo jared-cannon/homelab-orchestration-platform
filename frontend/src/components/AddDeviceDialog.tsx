@@ -30,7 +30,7 @@ export function AddDeviceDialog() {
     ip_address: '',
     mac_address: '',
     credentials: {
-      type: 'password' as 'password' | 'ssh_key',
+      type: 'auto' as 'auto' | 'password' | 'ssh_key',
       username: '',
       password: '',
       ssh_key: '',
@@ -64,7 +64,7 @@ export function AddDeviceDialog() {
         ip_address: '',
         mac_address: '',
         credentials: {
-          type: 'password',
+          type: 'auto',
           username: '',
           password: '',
           ssh_key: '',
@@ -115,6 +115,8 @@ export function AddDeviceDialog() {
       })
       return
     }
+
+    // For auto type, no additional validation needed - will use SSH agent/default keys
 
     try {
       const result = await testConnection.mutateAsync({
@@ -242,7 +244,7 @@ export function AddDeviceDialog() {
                   <Label htmlFor="auth-type">Login Method</Label>
                   <Select
                     value={formData.credentials.type}
-                    onValueChange={(value: 'password' | 'ssh_key') =>
+                    onValueChange={(value: 'auto' | 'password' | 'ssh_key') =>
                       setFormData({
                         ...formData,
                         credentials: { ...formData.credentials, type: value },
@@ -253,10 +255,16 @@ export function AddDeviceDialog() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="auto">Use My SSH Key (Recommended)</SelectItem>
                       <SelectItem value="password">Password</SelectItem>
                       <SelectItem value="ssh_key">Security Key</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formData.credentials.type === 'auto' && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Will use your default SSH key or SSH agent - no credentials stored
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid gap-2">
@@ -278,7 +286,7 @@ export function AddDeviceDialog() {
                   />
                 </div>
 
-                {formData.credentials.type === 'password' ? (
+                {formData.credentials.type === 'password' && (
                   <div className="grid gap-2">
                     <Label htmlFor="password">Password</Label>
                     <Input
@@ -297,7 +305,9 @@ export function AddDeviceDialog() {
                       required
                     />
                   </div>
-                ) : (
+                )}
+
+                {formData.credentials.type === 'ssh_key' && (
                   <>
                     <div className="grid gap-2">
                       <Label htmlFor="ssh-key">Security Key</Label>

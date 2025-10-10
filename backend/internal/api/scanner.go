@@ -43,9 +43,7 @@ func (h *ScannerHandler) StartScan(c *fiber.Ctx) error {
 	// Start the scan
 	scanID, err := h.service.StartScan(c.Context(), cidr)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return HandleError(c, 400, err, "Failed to start network scan")
 	}
 
 	return c.Status(201).JSON(fiber.Map{

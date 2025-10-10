@@ -3,6 +3,7 @@ import { apiClient } from './client'
 import type {
   CreateDeviceRequest,
   UpdateDeviceRequest,
+  UpdateCredentialsRequest,
   TestConnectionRequest,
   StartScanRequest,
 } from './types'
@@ -25,11 +26,12 @@ export function useDevices() {
   })
 }
 
-export function useDevice(id: string) {
+export function useDevice(id: string, options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: deviceKeys.detail(id),
     queryFn: () => apiClient.getDevice(id),
     enabled: !!id,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
@@ -78,6 +80,18 @@ export function useTestConnectionBeforeCreate() {
   return useMutation({
     mutationFn: (data: TestConnectionRequest) =>
       apiClient.testConnectionBeforeCreate(data),
+  })
+}
+
+export function useUpdateDeviceCredentials() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateCredentialsRequest }) =>
+      apiClient.updateDeviceCredentials(id, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: deviceKeys.detail(variables.id) })
+    },
   })
 }
 

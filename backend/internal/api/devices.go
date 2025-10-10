@@ -41,6 +41,11 @@ type UpdateDeviceRequest struct {
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// UpdateCredentialsRequest represents the request body for updating device credentials
+type UpdateCredentialsRequest struct {
+	Credentials services.DeviceCredentials `json:"credentials" validate:"required"`
+}
+
 // ListDevices handles GET /api/v1/devices
 func (h *DeviceHandler) ListDevices(c *fiber.Ctx) error {
 	devices, err := h.service.ListDevices()
@@ -62,6 +67,11 @@ func (h *DeviceHandler) CreateDevice(c *fiber.Ctx) error {
 		})
 	}
 
+	// Validate request
+	if err := ValidateRequest(c, &req); err != nil {
+		return err
+	}
+
 	device := &models.Device{
 		Name:       req.Name,
 		Type:       req.Type,
@@ -71,9 +81,7 @@ func (h *DeviceHandler) CreateDevice(c *fiber.Ctx) error {
 	}
 
 	if err := h.service.CreateDevice(device, &req.Credentials); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return HandleError(c, 400, err, "Failed to create device")
 	}
 
 	return c.Status(201).JSON(device)
@@ -129,9 +137,7 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 	}
 
 	if err := h.service.UpdateDevice(id, updates); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return HandleError(c, 400, err, "Failed to update device")
 	}
 
 	device, _ := h.service.GetDevice(id)
@@ -148,9 +154,7 @@ func (h *DeviceHandler) DeleteDevice(c *fiber.Ctx) error {
 	}
 
 	if err := h.service.DeleteDevice(id); err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return HandleError(c, 500, err, "Failed to delete device")
 	}
 
 	return c.Status(204).Send(nil)
@@ -165,11 +169,15 @@ func (h *DeviceHandler) TestConnectionBeforeCreate(c *fiber.Ctx) error {
 		})
 	}
 
+	// Validate request
+	if err := ValidateRequest(c, &req); err != nil {
+		return err
+	}
+
 	result, err := h.service.TestConnectionWithCredentials(req.IPAddress, &req.Credentials)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
+		return HandleErrorWithDetails(c, 400, err, "Connection test failed", fiber.Map{
 			"success": false,
-			"error":   err.Error(),
 			"details": result,
 		})
 	}
@@ -191,13 +199,40 @@ func (h *DeviceHandler) TestConnection(c *fiber.Ctx) error {
 
 	result, err := h.service.TestConnection(id)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": err.Error(),
-			"result": result,
-		})
+		return HandleErrorWithDetails(c, 400, err, "Connection test failed", result)
 	}
 
 	return c.JSON(result)
+}
+
+// UpdateDeviceCredentials handles PATCH /api/v1/devices/:id/credentials
+func (h *DeviceHandler) UpdateDeviceCredentials(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid device ID",
+		})
+	}
+
+	var req UpdateCredentialsRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	// Validate request
+	if err := ValidateRequest(c, &req); err != nil {
+		return err
+	}
+
+	if err := h.service.UpdateDeviceCredentials(id, &req.Credentials); err != nil {
+		return HandleError(c, 400, err, "Failed to update credentials")
+	}
+
+	return c.JSON(fiber.Map{
+		"message": "Credentials updated successfully",
+	})
 }
 
 // RegisterRoutes registers all device routes
@@ -211,4 +246,5 @@ func (h *DeviceHandler) RegisterRoutes(api fiber.Router) {
 	devices.Patch("/:id", h.UpdateDevice)
 	devices.Delete("/:id", h.DeleteDevice)
 	devices.Post("/:id/test-connection", h.TestConnection)
+	devices.Patch("/:id/credentials", h.UpdateDeviceCredentials)
 }

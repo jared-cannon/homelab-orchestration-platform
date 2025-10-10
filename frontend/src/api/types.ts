@@ -7,7 +7,7 @@ import type { DeviceType } from './generated-types'
 export type { Device, DeviceType, DeviceStatus, Application, Deployment, DeploymentStatus } from './generated-types'
 
 export interface DeviceCredentials {
-  type: 'password' | 'ssh_key'
+  type: 'auto' | 'password' | 'ssh_key'
   username: string
   password?: string
   ssh_key?: string
@@ -28,6 +28,10 @@ export interface UpdateDeviceRequest {
   type?: DeviceType
   mac_address?: string
   metadata?: string
+}
+
+export interface UpdateCredentialsRequest {
+  credentials: DeviceCredentials
 }
 
 export interface TestConnectionRequest {
@@ -91,4 +95,94 @@ export interface StartScanResponse {
   scan_id: string
   cidr: string
   message: string
+}
+
+// Software Management types
+export type SoftwareType = 'docker' | 'docker-compose' | 'nfs-server' | 'nfs-client'
+
+export interface InstalledSoftware {
+  id: string
+  device_id: string
+  name: SoftwareType
+  version: string
+  installed_at: string
+  installed_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface InstallSoftwareRequest {
+  software_type: SoftwareType
+  add_user_to_group?: boolean // For Docker only
+}
+
+// NFS types
+export interface NFSExport {
+  id: string
+  device_id: string
+  path: string
+  client_cidr: string
+  options: string
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface NFSMount {
+  id: string
+  device_id: string
+  server_ip: string
+  remote_path: string
+  local_path: string
+  options: string
+  permanent: boolean
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SetupNFSServerRequest {
+  export_path: string
+  client_cidr?: string
+  options?: string
+}
+
+export interface CreateExportRequest {
+  export_path: string
+  client_cidr?: string
+  options?: string
+}
+
+export interface MountNFSShareRequest {
+  server_ip: string
+  remote_path: string
+  local_path: string
+  options?: string
+  permanent: boolean
+}
+
+// Volume types
+export type VolumeType = 'local' | 'nfs'
+
+export interface Volume {
+  id: string
+  device_id: string
+  name: string
+  type: VolumeType
+  driver: string
+  driver_opts?: Record<string, string>
+  nfs_server_ip?: string
+  nfs_path?: string
+  size: number
+  in_use: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateVolumeRequest {
+  name: string
+  type: VolumeType
+  nfs_server_ip?: string
+  nfs_path?: string
+  options?: Record<string, string>
 }

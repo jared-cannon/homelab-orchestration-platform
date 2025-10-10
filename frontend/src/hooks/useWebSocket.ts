@@ -5,18 +5,24 @@ export function useWebSocket() {
   const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
-    // Connect on mount
-    wsService.connect()
+    // Track actual connection status from the service
+    const unsubscribe = wsService.onStatusChange((status) => {
+      setIsConnected(status === 'connected')
+    })
 
-    // Check connection status
-    const checkConnection = setInterval(() => {
-      // Access the private ws property (we'll need to make it public or add a getter)
-      setIsConnected(true) // For now, assume connected after initial connection
-    }, 1000)
+    // Set initial state based on current connection
+    setIsConnected(wsService.getStatus() === 'connected')
 
+    // Connect only if not already connected or connecting
+    // The singleton service handles duplicate connection attempts
+    if (wsService.getStatus() === 'disconnected') {
+      wsService.connect()
+    }
+
+    // Cleanup: Don't disconnect on unmount - keep connection alive for other components
     return () => {
-      clearInterval(checkConnection)
-      // Don't disconnect on unmount - keep connection alive
+      unsubscribe()
+      // Connection stays alive even when this component unmounts
     }
   }, [])
 

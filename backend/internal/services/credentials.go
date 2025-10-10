@@ -1,8 +1,15 @@
 package services
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/99designs/keyring"
@@ -10,16 +17,33 @@ import (
 
 // DeviceCredentials represents credentials for accessing a device
 type DeviceCredentials struct {
-	Type         string `json:"type"` // "password" or "ssh_key"
+	Type         string `json:"type"` // "password", "ssh_key", or "auto" (agent/default keys)
 	Username     string `json:"username"`
 	Password     string `json:"password,omitempty"`      // For password auth
 	SSHKey       string `json:"ssh_key,omitempty"`       // For SSH key auth
 	SSHKeyPasswd string `json:"ssh_key_passwd,omitempty"` // SSH key passphrase if needed
+	// For "auto" type, only Username is required - tries SSH agent first, then default SSH keys
 }
 
 // CredentialService manages secure storage of device credentials using OS keychain
 type CredentialService struct {
-	ring keyring.Keyring
+	ring          keyring.Keyring
+	encryptionKey []byte
+}
+
+// getEncryptionKey derives a 32-byte AES-256 key from environment or generates one
+func getEncryptionKey() []byte {
+	// Try to get key from environment variable
+	keyStr := os.Getenv("ENCRYPTION_KEY")
+	if keyStr == "" {
+		// For production, this should fail and require explicit key
+		// For development, use a default key (NOT SECURE for production)
+		keyStr = "homelab-default-encryption-key-change-in-production"
+	}
+
+	// Derive 32-byte key using SHA-256
+	hash := sha256.Sum256([]byte(keyStr))
+	return hash[:]
 }
 
 // NewCredentialService creates a new credential service
@@ -47,21 +71,37 @@ func NewCredentialService() (*CredentialService, error) {
 		return nil, fmt.Errorf("failed to open keyring: %w", err)
 	}
 
-	return &CredentialService{ring: ring}, nil
+	return &CredentialService{
+		ring:          ring,
+		encryptionKey: getEncryptionKey(),
+	}, nil
 }
 
 // StoreCredentials stores device credentials securely in the OS keychain
-func (s *CredentialService) StoreCredentials(deviceID string, creds *DeviceCredentials) error {
+// deviceName and deviceIP are optional - used for a more descriptive keychain label
+func (s *CredentialService) StoreCredentials(deviceID string, creds *DeviceCredentials, deviceName, deviceIP string) error {
 	// Marshal credentials to JSON
 	data, err := json.Marshal(creds)
 	if err != nil {
 		return fmt.Errorf("failed to marshal credentials: %w", err)
 	}
 
-	// Store in keyring with device ID as key
+	// Create a user-friendly label for the keychain
+	label := fmt.Sprintf("Homelab Device: %s", deviceID)
+	if deviceName != "" && deviceIP != "" {
+		label = fmt.Sprintf("Homelab: %s (%s)", deviceName, deviceIP)
+	} else if deviceName != "" {
+		label = fmt.Sprintf("Homelab: %s", deviceName)
+	} else if deviceIP != "" {
+		label = fmt.Sprintf("Homelab: %s", deviceIP)
+	}
+
+	// Store in keyring with device ID as key and a descriptive label
 	item := keyring.Item{
-		Key:  deviceID,
-		Data: data,
+		Key:         deviceID,
+		Data:        data,
+		Label:       label,
+		Description: "SSH credentials for homelab device",
 	}
 
 	if err := s.ring.Set(item); err != nil {
@@ -91,18 +131,77 @@ func (s *CredentialService) GetCredentials(deviceID string) (*DeviceCredentials,
 	return &creds, nil
 }
 
-// EncryptData encrypts data using the keyring
+// EncryptData encrypts data using AES-256-GCM
 func (s *CredentialService) EncryptData(data string) (string, error) {
-	// For now, return as-is. In production, use proper encryption
-	// TODO: Implement proper AES encryption
-	return data, nil
+	if data == "" {
+		return "", nil
+	}
+
+	// Create AES cipher block
+	block, err := aes.NewCipher(s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode (Galois/Counter Mode - provides authentication)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate random nonce (number used once)
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt and authenticate the data
+	// Format: nonce + ciphertext + authentication tag
+	ciphertext := gcm.Seal(nonce, nonce, []byte(data), nil)
+
+	// Encode to base64 for storage
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// DecryptData decrypts data using the keyring
+// DecryptData decrypts data using AES-256-GCM
 func (s *CredentialService) DecryptData(encrypted string) (string, error) {
-	// For now, return as-is. In production, use proper decryption
-	// TODO: Implement proper AES decryption
-	return encrypted, nil
+	if encrypted == "" {
+		return "", nil
+	}
+
+	// Decode from base64
+	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	// Create AES cipher block
+	block, err := aes.NewCipher(s.encryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Extract nonce from ciphertext
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+
+	// Decrypt and verify authentication tag
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return string(plaintext), nil
 }
 
 // DeleteCredentials removes device credentials from the OS keychain
