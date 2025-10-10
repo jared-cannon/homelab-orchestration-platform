@@ -1,0 +1,22 @@
+id: docker-compose-plugin
+name: Docker Compose Plugin
+description: Modern Docker Compose v2 plugin for orchestrating multi-container applications. Usually included with Docker Engine installation, but can be added separately if needed.
+category: container
+icon: docker
+
+commands:
+  check_installed: "docker compose version 2>/dev/null"
+  check_version: "docker compose version --short 2>/dev/null"
+  check_updates: "apt list --upgradable 2>/dev/null | grep 'docker-compose-plugin'"
+
+  install: |
+    sudo apt-get update &&
+    sudo apt-get install -y docker-compose-plugin
+
+  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y docker-compose-plugin"
+
+  post_install: "docker compose version"
+
+options:
+  required_for_deployments: "true"
+  included_with_docker: "true"

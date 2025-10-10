@@ -1,0 +1,153 @@
+id: uptime-kuma
+name: Uptime Kuma
+slug: uptime-kuma
+category: monitoring
+tagline: "Self-hosted uptime monitoring tool"
+description: "Beautiful and easy-to-use uptime monitoring tool. Monitor HTTP(s), TCP, Ping, DNS, and more. Get notified when your services go down via Telegram, Discord, Slack, email, and 90+ notification services."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/uptime-kuma.png"
+
+# Resource requirements
+resources:
+  min_ram_mb: 256
+  min_storage_gb: 1
+  recommended_ram_mb: 512
+  recommended_storage_gb: 2
+  cpu_cores: 1
+
+# Docker compose template
+compose_template: |
+  version: '3.8'
+  services:
+    uptime-kuma:
+      image: louislam/uptime-kuma:{{.Version}}
+      container_name: {{.ContainerName}}
+      restart: unless-stopped
+      {{if not .EnableProxy}}
+      ports:
+        - "{{.WebPort}}:3001"
+      {{end}}
+      volumes:
+        - uptime-kuma-data:/app/data
+      {{if .EnableProxy}}
+      networks:
+        - homelab-proxy
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.uptime-kuma.rule=Host(`{{.Domain}}`)"
+        - "traefik.http.routers.uptime-kuma.entrypoints=websecure"
+        - "traefik.http.routers.uptime-kuma.tls.certresolver=letsencrypt"
+        - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
+        - "traefik.docker.network=homelab-proxy"
+      {{end}}
+
+  volumes:
+    uptime-kuma-data:
+
+  {{if .EnableProxy}}
+  networks:
+    homelab-proxy:
+      external: true
+  {{end}}
+
+# User-configurable options
+config_options:
+  - name: version
+    label: "Uptime Kuma Version"
+    type: string
+    default: "1"
+    required: true
+    description: "Uptime Kuma Docker image tag"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "uptime-kuma"
+    required: true
+    description: "Name for the Docker container"
+
+  - name: enable_proxy
+    label: "Enable Traefik Proxy"
+    type: boolean
+    default: false
+    description: "Use Traefik reverse proxy (requires Traefik to be installed)"
+
+  - name: domain
+    label: "Domain (if using proxy)"
+    type: string
+    default: "status.homelab.local"
+    required: false
+    description: "Domain for accessing Uptime Kuma via Traefik"
+
+  - name: web_port
+    label: "Web Port (if not using proxy)"
+    type: number
+    default: 3001
+    required: false
+    description: "Port to expose Uptime Kuma on"
+
+# Post-deployment instructions
+post_deploy_instructions: |
+  🎉 Uptime Kuma is now running!
+
+  **Access Uptime Kuma:**
+  {{if .EnableProxy}}
+  - URL: https://{{.Domain}}
+  {{else}}
+  - URL: http://<device-ip>:{{.WebPort}}
+  {{end}}
+
+  **First Time Setup:**
+  1. Open Uptime Kuma in your browser
+  2. Create an admin account
+  3. Start adding monitors for your services!
+
+  **Monitoring Your Homelab:**
+
+  **Recommended Monitors to Add:**
+  1. **HTTP(S) Monitors** - For web apps deployed through this platform
+     - Vaultwarden, Nextcloud, etc.
+     - Monitor URL: https://app.homelab.local
+
+  2. **Ping Monitors** - For all your devices
+     - Router, NAS, Raspberry Pis, servers
+     - Helps detect when devices go offline
+
+  3. **Docker Container** - Monitor Docker daemon health
+     - Ensures Docker is running on each device
+
+  4. **Port Monitors** - For non-HTTP services
+     - SSH (port 22), databases, etc.
+
+  **Setting Up Notifications:**
+  1. Go to Settings → Notifications
+  2. Add your preferred notification channel:
+     - Email, Telegram, Discord, Slack
+     - Pushover, Pushbullet, Gotify
+     - 90+ services supported!
+  3. Test the notification to make sure it works
+  4. Add notification to your monitors
+
+  **Status Page:**
+  - Create a public status page: Settings → Status Pages
+  - Share with family/team to show homelab health
+  - Customizable with your logo and colors
+
+  **Tips:**
+  - Set check intervals based on criticality (1-5 minutes)
+  - Use heartbeat monitors for cron jobs
+  - Enable "Upsidedown Mode" to monitor that a service STAYS down
+  - Use tags to organize monitors (e.g., "infrastructure", "media", "security")
+  - Set retry attempts to avoid false alarms
+
+  **Monitoring This Platform:**
+  - Add monitors for all apps you deploy
+  - Monitor the orchestrator platform itself
+  - Set up a monitor for Traefik dashboard
+  - Monitor Portainer availability
+
+# Health check
+health_check:
+  path: "/"
+  expected_status: 200
+  timeout_seconds: 30

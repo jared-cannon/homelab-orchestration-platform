@@ -50,6 +50,8 @@ export const DeploymentStatusRolledBack: DeploymentStatus = "rolled_back";
  */
 export interface Deployment {
   id: string;
+  recipe_slug: string;
+  recipe_name: string;
   application_id: string;
   application?: Application;
   device_id: string;
@@ -60,7 +62,9 @@ export interface Deployment {
   internal_port: number /* int */;
   external_port?: number /* int */;
   container_id?: string;
+  compose_project?: string;
   generated_compose?: string; // For debugging/transparency
+  deployment_logs?: string; // Logs from deployment process
   ssh_commands?: string; // For debugging
   rollback_log?: string; // For debugging
   error_details?: string;

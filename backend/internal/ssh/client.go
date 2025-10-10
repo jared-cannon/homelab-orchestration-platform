@@ -397,8 +397,13 @@ func (c *Client) GetConnection(host string) (*ssh.Client, error) {
 	return nil, fmt.Errorf("no active connection to %s", host)
 }
 
-// Execute runs a command on the remote host
+// Execute runs a command on the remote host with a default 5-minute timeout
 func (c *Client) Execute(host string, command string) (string, error) {
+	return c.ExecuteWithTimeout(host, command, 5*time.Minute)
+}
+
+// ExecuteWithTimeout runs a command on the remote host with a specified timeout
+func (c *Client) ExecuteWithTimeout(host string, command string, timeout time.Duration) (string, error) {
 	client, err := c.GetConnection(host)
 	if err != nil {
 		return "", err
@@ -410,12 +415,32 @@ func (c *Client) Execute(host string, command string) (string, error) {
 	}
 	defer session.Close()
 
-	output, err := session.CombinedOutput(command)
-	if err != nil {
-		return string(output), fmt.Errorf("command failed: %w", err)
+	// Create a channel to receive the result
+	type result struct {
+		output string
+		err    error
 	}
+	resultChan := make(chan result, 1)
 
-	return string(output), nil
+	// Run command in goroutine
+	go func() {
+		output, err := session.CombinedOutput(command)
+		if err != nil {
+			resultChan <- result{output: string(output), err: fmt.Errorf("command failed: %w", err)}
+		} else {
+			resultChan <- result{output: string(output), err: nil}
+		}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case res := <-resultChan:
+		return res.output, res.err
+	case <-time.After(timeout):
+		// Timeout occurred - close session to kill the command
+		session.Close()
+		return "", fmt.Errorf("command timed out after %v", timeout)
+	}
 }
 
 // CopyFile copies a file to the remote host

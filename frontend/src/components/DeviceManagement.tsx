@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info, ArrowUp } from 'lucide-react'
+import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info, ArrowUp, Rocket, CheckCircle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card } from './ui/card'
 import { apiClient, APIError } from '../api/client'
@@ -10,13 +10,20 @@ import type {
   CreateVolumeRequest,
   VolumeType,
   SoftwareUpdateInfo,
+  DeploymentStatus,
 } from '../api/types'
+import { Badge } from './ui/badge'
+import { useNavigate } from 'react-router-dom'
+import { deploymentKeys, useSoftwareInstallation, useActiveInstallation } from '../api/hooks'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog'
+import { Button } from './ui/button'
+import { LogViewer } from './LogViewer'
 
 interface DeviceManagementProps {
   deviceId: string
 }
 
-type Tab = 'software' | 'nfs' | 'volumes'
+type Tab = 'software' | 'nfs' | 'volumes' | 'deployments'
 
 export function DeviceManagement({ deviceId }: DeviceManagementProps) {
   const [activeTab, setActiveTab] = useState<Tab>('software')
@@ -72,12 +79,26 @@ export function DeviceManagement({ deviceId }: DeviceManagementProps) {
               Docker Volumes
             </div>
           </button>
+          <button
+            onClick={() => setActiveTab('deployments')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'deployments'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Rocket className="w-4 h-4" />
+              Deployments
+            </div>
+          </button>
         </div>
 
         {/* Tab Content */}
         {activeTab === 'software' && <SoftwareTab deviceId={deviceId} />}
         {activeTab === 'nfs' && <NFSTab deviceId={deviceId} />}
         {activeTab === 'volumes' && <VolumesTab deviceId={deviceId} />}
+        {activeTab === 'deployments' && <DeploymentsTab deviceId={deviceId} />}
       </div>
     </Card>
   )
@@ -87,7 +108,22 @@ export function DeviceManagement({ deviceId }: DeviceManagementProps) {
 function SoftwareTab({ deviceId }: { deviceId: string }) {
   const queryClient = useQueryClient()
   const [installing, setInstalling] = useState(false)
+  const [installationId, setInstallationId] = useState<string>('')
+  const [installationModalOpen, setInstallationModalOpen] = useState(false)
   const [sudoError, setSudoError] = useState<{ deviceIp: string; fixSteps: string[] } | null>(null)
+
+  // Track installation progress
+  const { data: installation } = useSoftwareInstallation(deviceId, installationId)
+
+  // Get active installation from backend
+  const { data: activeInstallation } = useActiveInstallation(deviceId)
+
+  // Set installationId from active installation on mount
+  useEffect(() => {
+    if (activeInstallation && !installationId) {
+      setInstallationId(activeInstallation.id)
+    }
+  }, [activeInstallation, installationId])
 
   const { data: software = [], isLoading } = useQuery({
     queryKey: ['software', deviceId],
@@ -136,7 +172,14 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
       setUpdateInfo([])
     },
     onError: (error: Error) => {
-      toast.error('Update failed', { description: error.message })
+      if (error instanceof APIError && error.code === 'SUDO_NOT_CONFIGURED') {
+        setSudoError({
+          deviceIp: error.details?.device_ip || '',
+          fixSteps: error.details?.fix_steps || []
+        })
+      } else {
+        toast.error('Update failed', { description: error.message })
+      }
     },
   })
 
@@ -153,9 +196,10 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
   const installMutation = useMutation({
     mutationFn: (data: InstallSoftwareRequest) =>
       apiClient.installSoftware(deviceId, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['software', deviceId] })
-      toast.success('Software installed successfully')
+    onSuccess: (installation) => {
+      // Installation started - show modal with progress
+      setInstallationId(installation.id)
+      setInstallationModalOpen(true)
       setInstalling(false)
       setSudoError(null)
     },
@@ -180,6 +224,13 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
     })
   }
 
+  const handleCloseInstallationModal = () => {
+    setInstallationModalOpen(false)
+    setInstallationId('')
+    // Refresh software list after installation completes
+    queryClient.invalidateQueries({ queryKey: ['software', deviceId] })
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -201,6 +252,27 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Active Installation Banner */}
+      {installation && installation.status !== 'success' && installation.status !== 'failed' && (
+        <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <div className="flex items-start gap-3">
+            <Loader2 className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0 animate-spin" />
+            <div className="flex-1">
+              <h4 className="font-semibold text-blue-500 mb-1">Installation in Progress</h4>
+              <p className="text-sm text-foreground mb-2">
+                Installing <span className="font-medium">{installation.software_name}</span>... You can safely leave this page - the installation will continue in the background.
+              </p>
+              <button
+                onClick={() => setInstallationModalOpen(true)}
+                className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              >
+                View Progress
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sudo Configuration Alert */}
       {sudoError && (
         <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg">
@@ -317,20 +389,100 @@ function SoftwareTab({ deviceId }: { deviceId: string }) {
         <div>
           <h3 className="text-sm font-medium text-muted-foreground mb-3">Available to Install</h3>
           <div className="space-y-2">
-            {available.map((s) => (
-              <button
-                key={s.name}
-                onClick={() => handleInstall(s.name)}
-                disabled={installing}
-                className="w-full flex items-center justify-between p-3 bg-card border border-border rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
-              >
-                <span className="font-medium">{s.label}</span>
-                <Plus className="w-4 h-4" />
-              </button>
-            ))}
+            {available.map((s) => {
+              const isInstalling = installation?.software_name === s.name &&
+                                   installation?.status !== 'success' &&
+                                   installation?.status !== 'failed'
+              const hasActiveInstallation = installation &&
+                                            installation.status !== 'success' &&
+                                            installation.status !== 'failed'
+
+              return (
+                <button
+                  key={s.name}
+                  onClick={() => handleInstall(s.name)}
+                  disabled={installing || hasActiveInstallation}
+                  className="w-full flex items-center justify-between p-3 bg-card border border-border rounded-lg hover:bg-accent transition-colors disabled:opacity-50"
+                >
+                  <span className="font-medium">
+                    {isInstalling ? `${s.label} - Installing...` : s.label}
+                  </span>
+                  {isInstalling ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                  ) : (
+                    <Plus className="w-4 h-4" />
+                  )}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
+
+      {/* Installation Progress Modal */}
+      <Dialog open={installationModalOpen} onOpenChange={setInstallationModalOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              {installation ? `Installing ${installation.software_name}` : 'Installing Software'}
+            </DialogTitle>
+            <DialogDescription>
+              {installation?.status === 'success'
+                ? 'Installation completed successfully'
+                : installation?.status === 'failed'
+                ? 'Installation failed'
+                : 'You can safely close this dialog - the installation will continue in the background.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            {/* Status Badge */}
+            {installation && (
+              <div className="mb-4 flex items-center gap-3">
+                {installation.status === 'success' ? (
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                ) : installation.status === 'failed' ? (
+                  <XCircle className="w-5 h-5 text-red-600" />
+                ) : (
+                  <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                )}
+                <div className="flex-1">
+                  <div className="font-medium capitalize">
+                    {installation.status.replace('_', ' ')}
+                  </div>
+                  {installation.error_details && (
+                    <div className="text-sm text-red-600 mt-1">{installation.error_details}</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Live Logs */}
+            {installation?.install_logs && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Installation Logs</h4>
+                <LogViewer logs={installation.install_logs} />
+              </div>
+            )}
+
+            {!installation?.install_logs && (
+              <div className="text-center py-8 text-muted-foreground">
+                <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                <p>Preparing installation...</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              onClick={handleCloseInstallationModal}
+              variant={installation?.status === 'success' ? 'default' : 'outline'}
+            >
+              {installation?.status === 'success' || installation?.status === 'failed' ? 'Close' : 'Close (continues in background)'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -747,6 +899,133 @@ function VolumesTab({ deviceId }: { deviceId: string }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Deployments Tab
+function DeploymentsTab({ deviceId }: { deviceId: string }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const { data: deployments = [], isLoading } = useQuery({
+    queryKey: deploymentKeys.list({ deviceId }),
+    queryFn: () => apiClient.listDeployments(deviceId),
+  })
+
+  const deleteDeployment = useMutation({
+    mutationFn: (id: string) => apiClient.deleteDeployment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] })
+      toast.success('Deployment deleted successfully')
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to delete deployment', { description: error.message })
+    },
+  })
+
+  const getStatusBadge = (status: DeploymentStatus) => {
+    const config: Record<DeploymentStatus, { label: string; variant: 'default' | 'secondary' | 'success' | 'warning' | 'danger' }> = {
+      validating: { label: 'Validating', variant: 'secondary' },
+      preparing: { label: 'Preparing', variant: 'secondary' },
+      deploying: { label: 'Deploying', variant: 'default' },
+      configuring: { label: 'Configuring', variant: 'default' },
+      health_check: { label: 'Health Check', variant: 'default' },
+      running: { label: 'Running', variant: 'success' },
+      stopped: { label: 'Stopped', variant: 'warning' },
+      failed: { label: 'Failed', variant: 'danger' },
+      rolling_back: { label: 'Rolling Back', variant: 'danger' },
+      rolled_back: { label: 'Rolled Back', variant: 'warning' },
+    }
+
+    const { label, variant } = config[status] || { label: status, variant: 'secondary' as const }
+
+    return (
+      <Badge variant={variant} className="w-fit">
+        {label}
+      </Badge>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (deployments.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <Rocket className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+        <p className="text-sm text-muted-foreground mb-2">No deployments on this device</p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Deploy an app from the marketplace to get started
+        </p>
+        <button
+          onClick={() => navigate('/marketplace')}
+          className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+        >
+          Browse Marketplace
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {deployments.map((deployment) => (
+        <div
+          key={deployment.id}
+          className="p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition-colors"
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <h4 className="font-medium">{deployment.recipe_name}</h4>
+                {getStatusBadge(deployment.status)}
+              </div>
+              <p className="text-xs text-muted-foreground mb-1">
+                Recipe: {deployment.recipe_slug}
+              </p>
+              {deployment.deployed_at && (
+                <p className="text-xs text-muted-foreground">
+                  Deployed: {new Date(deployment.deployed_at).toLocaleString()}
+                </p>
+              )}
+              {deployment.error_details && (
+                <p className="text-xs text-danger mt-2">{deployment.error_details}</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/deployments')}
+                className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+                title="View all deployments"
+              >
+                <Rocket className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => deleteDeployment.mutate(deployment.id)}
+                disabled={deleteDeployment.isPending}
+                className="p-2 text-destructive hover:bg-destructive/10 rounded disabled:opacity-50 transition-colors"
+                title="Delete deployment"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="pt-2">
+        <button
+          onClick={() => navigate('/deployments')}
+          className="w-full text-center text-sm text-primary hover:underline"
+        >
+          View all deployments →
+        </button>
+      </div>
     </div>
   )
 }

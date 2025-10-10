@@ -1,0 +1,92 @@
+id: vaultwarden
+name: Vaultwarden
+slug: vaultwarden
+category: security
+tagline: "Open source password manager"
+description: "Self-hosted Bitwarden-compatible password manager. Lightweight, secure, and feature-complete. Perfect for managing passwords across all your devices without monthly fees."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/vaultwarden.png"
+
+# Resource requirements
+resources:
+  min_ram_mb: 512
+  min_storage_gb: 1
+  recommended_ram_mb: 1024
+  recommended_storage_gb: 5
+  cpu_cores: 1
+
+# Docker compose template
+compose_template: |
+  version: '3.8'
+  services:
+    vaultwarden:
+      image: vaultwarden/server:{{.Version}}
+      container_name: {{.ContainerName}}
+      restart: unless-stopped
+      environment:
+        DOMAIN: "https://{{.Domain}}"
+        SIGNUPS_ALLOWED: "{{.AllowSignups}}"
+      volumes:
+        - vaultwarden-data:/data
+      ports:
+        - "{{.InternalPort}}:80"
+
+  volumes:
+    vaultwarden-data:
+
+# User-configurable options (shown in deployment wizard)
+config_options:
+  - name: domain
+    label: "Domain"
+    type: string
+    default: "vault.home"
+    required: true
+    description: "Domain name for accessing Vaultwarden"
+
+  - name: internal_port
+    label: "Internal Port"
+    type: number
+    default: 8080
+    required: true
+    description: "Port to expose Vaultwarden on (will be proxied)"
+
+  - name: allow_signups
+    label: "Allow new user registrations"
+    type: boolean
+    default: false
+    description: "Allow anyone to create an account (disable after first user)"
+
+  - name: version
+    label: "Version"
+    type: string
+    default: "latest"
+    required: true
+    description: "Vaultwarden version tag"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "vaultwarden"
+    required: true
+    description: "Name for the Docker container"
+
+# Post-deployment instructions
+post_deploy_instructions: |
+  🎉 Vaultwarden is now running!
+
+  **Next steps:**
+  1. Visit https://{{.Domain}} to create your account
+  2. Install browser extensions from https://bitwarden.com/download/
+  3. Configure your server URL as https://{{.Domain}}
+  4. IMPORTANT: Disable signups after creating your account for security
+
+  **Tips:**
+  - Use a strong master password - it's the key to all your passwords
+  - Enable 2FA for extra security
+  - Install the mobile app to access passwords on the go
+
+# Health check
+health_check:
+  path: "/alive"
+  expected_status: 200
+  timeout_seconds: 60

@@ -49,6 +49,7 @@ func initDB() (*gorm.DB, error) {
 		&models.Deployment{},
 		&models.Credential{},
 		&models.InstalledSoftware{},
+		&models.SoftwareInstallation{},
 		&models.NFSExport{},
 		&models.NFSMount{},
 		&models.Volume{},
@@ -84,6 +85,7 @@ func main() {
 
 	sshClient := ssh.NewClient()
 	credMatcher := services.NewCredentialMatcher(db, credService, sshClient)
+	validator := services.NewValidatorService(sshClient)
 	deviceService := services.NewDeviceService(db, credService, sshClient)
 	userService := services.NewUserService(db)
 
@@ -97,10 +99,24 @@ func main() {
 	// Initialize software registry
 	softwareRegistry := services.NewSoftwareRegistry("./software-definitions")
 
-	// Initialize software and infrastructure services
-	softwareService := services.NewSoftwareService(db, sshClient, softwareRegistry)
+	// Initialize software and infrastructure services (pass wsHub for log streaming)
+	softwareService := services.NewSoftwareService(db, sshClient, softwareRegistry, wsHub)
 	nfsService := services.NewNFSService(db, sshClient, softwareService)
 	volumeService := services.NewVolumeService(db, sshClient, softwareService)
+
+	// Initialize marketplace
+	recipeLoader := services.NewRecipeLoader("./marketplace-recipes")
+	if _, err := recipeLoader.LoadAll(); err != nil {
+		log.Printf("⚠️  Warning: Failed to load marketplace recipes: %v", err)
+	} else {
+		recipes := recipeLoader.ListRecipes()
+		log.Printf("🏪 Marketplace initialized with %d recipes", len(recipes))
+	}
+	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator)
+	deviceScorer := services.NewDeviceScorer(db, sshClient)
+
+	// Initialize deployment service
+	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, wsHub)
 
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
@@ -173,10 +189,18 @@ func main() {
 	scannerHandler := api.NewScannerHandler(scannerService)
 	scannerHandler.RegisterRoutes(protectedGroup)
 
-	// Register software, NFS, and volume handlers
+	// Register software, NFS, volume, marketplace, and deployment handlers
 	softwareHandler := api.NewSoftwareHandler(softwareService)
 	nfsHandler := api.NewNFSHandler(nfsService)
 	volumeHandler := api.NewVolumeHandler(volumeService)
+	marketplaceHandler := api.NewMarketplaceHandler(marketplaceService, deviceScorer)
+	deploymentHandler := api.NewDeploymentHandler(deploymentService)
+
+	// Register marketplace routes
+	marketplaceHandler.RegisterRoutes(protectedGroup)
+
+	// Register deployment routes
+	deploymentHandler.RegisterRoutes(protectedGroup)
 
 	// Register nested routes under devices
 	devices := protectedGroup.Group("/devices/:id")
@@ -184,6 +208,8 @@ func main() {
 	// Software management routes
 	devices.Get("/software", softwareHandler.ListInstalled)
 	devices.Post("/software", softwareHandler.InstallSoftware)
+	devices.Get("/software/installations/active", softwareHandler.GetActiveInstallation)
+	devices.Get("/software/installations/:installation_id", softwareHandler.GetInstallation)
 	devices.Post("/software/detect", softwareHandler.DetectInstalled)
 	devices.Get("/software/updates", softwareHandler.CheckUpdates)
 	devices.Post("/software/:name/update", softwareHandler.UpdateSoftware)

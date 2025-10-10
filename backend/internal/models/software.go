@@ -20,9 +20,9 @@ const (
 // InstalledSoftware tracks software installed on devices
 type InstalledSoftware struct {
 	ID          uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
-	DeviceID    uuid.UUID    `gorm:"type:uuid;not null;index" json:"device_id"`
+	DeviceID    uuid.UUID    `gorm:"type:uuid;not null;uniqueIndex:idx_device_software" json:"device_id"`
 	Device      Device       `gorm:"foreignKey:DeviceID" json:"-"`
-	Name        SoftwareType `gorm:"not null" json:"name"`
+	Name        SoftwareType `gorm:"not null;uniqueIndex:idx_device_software" json:"name"`
 	Version     string       `json:"version"`
 	InstalledAt time.Time    `json:"installed_at"`
 	InstalledBy string       `json:"installed_by"` // username or "system"

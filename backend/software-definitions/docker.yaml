@@ -1,25 +1,35 @@
 id: docker
 name: Docker Engine
-description: Container runtime platform for building and running applications
+description: Container runtime platform with Docker Compose plugin for building and running applications
 category: container
 icon: docker
 
 commands:
   check_installed: "docker --version 2>/dev/null"
   check_version: "docker --version 2>/dev/null | awk '{print $3}' | sed 's/,//'"
-  check_updates: "apt list --upgradable 2>/dev/null | grep -E '^docker-ce/|^containerd.io/'"
+  check_updates: "apt list --upgradable 2>/dev/null | grep -E '^docker-ce/|^containerd.io/|^docker-compose-plugin/'"
 
   install: |
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh &&
-    sudo sh /tmp/get-docker.sh &&
-    rm /tmp/get-docker.sh
+    for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
+      sudo apt-get remove -y $pkg 2>/dev/null || true
+    done &&
+    sudo apt-get update &&
+    sudo apt-get install -y ca-certificates curl &&
+    sudo install -m 0755 -d /etc/apt/keyrings &&
+    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc &&
+    sudo chmod a+r /etc/apt/keyrings/docker.asc &&
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null &&
+    sudo apt-get update &&
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y docker-ce docker-ce-cli containerd.io"
+  update: "sudo apt-get update && sudo apt-get install --only-upgrade -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
 
   post_install: |
-    sudo systemctl start docker &&
+    sudo systemctl enable docker.socket 2>/dev/null || true
+    sudo systemctl start docker.socket 2>/dev/null || true
     sudo systemctl enable docker
+    sudo systemctl start docker
+    sudo usermod -aG docker $USER 2>/dev/null || true
 
 options:
-  add_user_to_group: "true"
-  user_group_command: "sudo usermod -aG docker $USER"
+  includes_compose_plugin: "true"

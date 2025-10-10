@@ -10,7 +10,7 @@ import (
 
 func TestGenerateSmartName(t *testing.T) {
 	// Use nil SSH client for pure logic tests
-	scanner := NewScannerService(nil, nil, nil)
+	scanner := NewScannerService(nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -127,7 +127,7 @@ func TestGenerateSmartName(t *testing.T) {
 
 func TestDetectDeviceType(t *testing.T) {
 	// Use nil SSH client for pure logic tests
-	scanner := NewScannerService(nil, nil, nil)
+	scanner := NewScannerService(nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -182,7 +182,7 @@ func TestDetectDeviceType(t *testing.T) {
 func TestIsDeviceAlreadyAdded(t *testing.T) {
 	db := setupTestDB(t)
 	// Use nil SSH client for database tests
-	scanner := NewScannerService(db, nil, nil)
+	scanner := NewScannerService(db, nil, nil, nil)
 
 	// Add a device to the database
 	device := &models.Device{
@@ -236,7 +236,7 @@ func TestIsDeviceAlreadyAdded(t *testing.T) {
 
 func TestIsPrivateIP(t *testing.T) {
 	// Use nil SSH client for pure logic tests
-	scanner := NewScannerService(nil, nil, nil)
+	scanner := NewScannerService(nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -281,7 +281,7 @@ func TestIsPrivateIP(t *testing.T) {
 
 func TestCalculateHostCount(t *testing.T) {
 	// Use nil SSH client for pure logic tests
-	scanner := NewScannerService(nil, nil, nil)
+	scanner := NewScannerService(nil, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -322,7 +322,7 @@ func TestCalculateHostCount(t *testing.T) {
 
 // TestGetMACAddressIPValidation tests IP validation logic before ARP requests
 func TestGetMACAddressIPValidation(t *testing.T) {
-	scanner := NewScannerService(nil, nil, nil)
+	scanner := NewScannerService(nil, nil, nil, nil)
 
 	tests := []struct {
 		name      string

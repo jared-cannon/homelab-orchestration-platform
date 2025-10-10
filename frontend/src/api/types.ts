@@ -1,7 +1,7 @@
 // TypeScript types for API requests and responses
 // Core models (Device, Application, Deployment) are imported from generated-types
 
-import type { DeviceType } from './generated-types'
+import type { Device, DeviceType } from './generated-types'
 
 // Re-export core types from generated-types for convenience
 export type { Device, DeviceType, DeviceStatus, Application, Deployment, DeploymentStatus } from './generated-types'
@@ -197,4 +197,101 @@ export interface SoftwareUpdateInfo {
   available_version?: string
   update_available: boolean
   message?: string
+}
+
+// Software Installation types
+export type SoftwareInstallationStatus = 'pending' | 'installing' | 'success' | 'failed'
+
+export interface SoftwareInstallation {
+  id: string
+  device_id: string
+  software_name: SoftwareType
+  status: SoftwareInstallationStatus
+  install_logs?: string
+  error_details?: string
+  created_at: string
+  completed_at?: string
+  device?: Device
+}
+
+// Marketplace types
+export interface Recipe {
+  id: string
+  name: string
+  slug: string
+  category: string
+  tagline: string
+  description: string
+  icon_url: string
+  resources: RecipeResources
+  compose_template: string
+  config_options: RecipeConfigOption[]
+  post_deploy_instructions: string
+  health_check: RecipeHealthCheck
+}
+
+export interface RecipeResources {
+  min_ram_mb: number
+  min_storage_gb: number
+  recommended_ram_mb: number
+  recommended_storage_gb: number
+  cpu_cores: number
+}
+
+export interface RecipeConfigOption {
+  name: string
+  label: string
+  type: 'string' | 'number' | 'boolean'
+  default: string | number | boolean
+  required: boolean
+  description: string
+}
+
+export interface RecipeHealthCheck {
+  path: string
+  port: number
+  expected_status: number
+  timeout_seconds: number
+}
+
+export interface ValidationResult {
+  valid: boolean
+  errors?: string[]
+  warnings?: string[]
+  resource_check?: ResourceCheck
+  port_conflicts?: number[]
+  rendered_compose?: string
+}
+
+export interface ResourceCheck {
+  required_ram_mb: number
+  available_ram_mb: number
+  ram_sufficient: boolean
+  required_storage_gb: number
+  available_storage_gb: number
+  storage_sufficient: boolean
+  docker_installed: boolean
+  docker_running: boolean
+}
+
+export interface ValidateDeploymentRequest {
+  device_id: string
+  config: Record<string, any>
+}
+
+export interface DeviceScore {
+  device_id: string
+  device_name: string
+  device_ip: string
+  score: number // 0-100
+  recommendation: 'best' | 'good' | 'acceptable' | 'not-recommended'
+  reasons: string[]
+  available: boolean
+}
+
+// Deployment types
+export interface CreateDeploymentRequest {
+  recipe_slug: string
+  device_id: string
+  config: Record<string, any>
 }

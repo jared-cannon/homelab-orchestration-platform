@@ -26,7 +26,9 @@ const (
 // Deployment represents a deployed application on a device
 type Deployment struct {
 	ID               uuid.UUID        `gorm:"type:uuid;primaryKey" json:"id"`
-	ApplicationID    uuid.UUID        `gorm:"type:uuid;not null" json:"application_id"`
+	RecipeSlug       string           `gorm:"not null" json:"recipe_slug"`                  // Marketplace recipe identifier
+	RecipeName       string           `json:"recipe_name"`                                  // Cached for display
+	ApplicationID    uuid.UUID        `gorm:"type:uuid" json:"application_id,omitempty"`    // Legacy - made nullable
 	Application      *Application     `gorm:"foreignKey:ApplicationID" json:"application,omitempty"`
 	DeviceID         uuid.UUID        `gorm:"type:uuid;not null" json:"device_id"`
 	Device           *Device          `gorm:"foreignKey:DeviceID" json:"device,omitempty"`
@@ -36,7 +38,9 @@ type Deployment struct {
 	InternalPort     int              `json:"internal_port"`
 	ExternalPort     int              `json:"external_port,omitempty"`
 	ContainerID      string           `json:"container_id,omitempty"`
+	ComposeProject   string           `json:"compose_project,omitempty"`                    // Docker Compose project name
 	GeneratedCompose string           `gorm:"type:text" json:"generated_compose,omitempty"` // For debugging/transparency
+	DeploymentLogs   string           `gorm:"type:text" json:"deployment_logs,omitempty"`   // Logs from deployment process
 	SSHCommands      []byte           `gorm:"type:json" json:"ssh_commands,omitempty"`      // For debugging
 	RollbackLog      []byte           `gorm:"type:json" json:"rollback_log,omitempty"`      // For debugging
 	ErrorDetails     string           `gorm:"type:text" json:"error_details,omitempty"`

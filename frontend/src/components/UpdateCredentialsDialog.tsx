@@ -21,11 +21,8 @@ interface UpdateCredentialsDialogProps {
 
 export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCredentialsDialogProps) {
   const [formData, setFormData] = useState<DeviceCredentials>({
-    type: 'auto' as 'auto' | 'password' | 'ssh_key',
+    type: 'auto',
     username: '',
-    password: '',
-    ssh_key: '',
-    ssh_key_passwd: '',
   })
 
   const updateCredentials = useUpdateDeviceCredentials()
