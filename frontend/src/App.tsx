@@ -2,6 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { DevicesPage } from './pages/Devices'
 import { DeviceDetailPage } from './pages/DeviceDetail'
+import { DeploymentsPage } from './pages/Deployments'
+import { MarketplacePage } from './pages/Marketplace'
+import { RecipeDetailPage } from './pages/RecipeDetail'
 import { LoginPage } from './pages/Login'
 import { SetupPage } from './pages/Setup'
 import { AuthProvider } from './components/AuthProvider'
@@ -33,6 +36,36 @@ function AppContent() {
           <ProtectedRoute>
             <AuthLayout>
               <DeviceDetailPage />
+            </AuthLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/deployments"
+        element={
+          <ProtectedRoute>
+            <AuthLayout>
+              <DeploymentsPage />
+            </AuthLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/marketplace"
+        element={
+          <ProtectedRoute>
+            <AuthLayout>
+              <MarketplacePage />
+            </AuthLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/marketplace/:slug"
+        element={
+          <ProtectedRoute>
+            <AuthLayout>
+              <RecipeDetailPage />
             </AuthLayout>
           </ProtectedRoute>
         }

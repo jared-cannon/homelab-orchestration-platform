@@ -102,6 +102,20 @@ func main() {
 	nfsService := services.NewNFSService(db, sshClient, softwareService)
 	volumeService := services.NewVolumeService(db, sshClient, softwareService)
 
+	// Initialize marketplace
+	recipeLoader := services.NewRecipeLoader("./marketplace-recipes")
+	if _, err := recipeLoader.LoadAll(); err != nil {
+		log.Printf("⚠️  Warning: Failed to load marketplace recipes: %v", err)
+	} else {
+		recipes := recipeLoader.ListRecipes()
+		log.Printf("🏪 Marketplace initialized with %d recipes", len(recipes))
+	}
+	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService)
+	deviceScorer := services.NewDeviceScorer(db, sshClient)
+
+	// Initialize deployment service
+	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, wsHub)
+
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
 	healthCheckService.SetDeviceService(deviceService)
@@ -173,10 +187,18 @@ func main() {
 	scannerHandler := api.NewScannerHandler(scannerService)
 	scannerHandler.RegisterRoutes(protectedGroup)
 
-	// Register software, NFS, and volume handlers
+	// Register software, NFS, volume, marketplace, and deployment handlers
 	softwareHandler := api.NewSoftwareHandler(softwareService)
 	nfsHandler := api.NewNFSHandler(nfsService)
 	volumeHandler := api.NewVolumeHandler(volumeService)
+	marketplaceHandler := api.NewMarketplaceHandler(marketplaceService, deviceScorer)
+	deploymentHandler := api.NewDeploymentHandler(deploymentService)
+
+	// Register marketplace routes
+	marketplaceHandler.RegisterRoutes(protectedGroup)
+
+	// Register deployment routes
+	deploymentHandler.RegisterRoutes(protectedGroup)
 
 	// Register nested routes under devices
 	devices := protectedGroup.Group("/devices/:id")

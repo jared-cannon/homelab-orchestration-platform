@@ -159,3 +159,178 @@ export function useDetectNetwork() {
     queryFn: () => apiClient.detectNetwork(),
   })
 }
+
+// Marketplace query keys
+export const marketplaceKeys = {
+  all: ['marketplace'] as const,
+  recipes: () => [...marketplaceKeys.all, 'recipes'] as const,
+  recipe: (slug: string) => [...marketplaceKeys.recipes(), slug] as const,
+  recipesByCategory: (category?: string) => [...marketplaceKeys.recipes(), { category }] as const,
+  categories: () => [...marketplaceKeys.all, 'categories'] as const,
+}
+
+// Marketplace hooks
+export function useRecipes(category?: string) {
+  return useQuery({
+    queryKey: marketplaceKeys.recipesByCategory(category),
+    queryFn: () => apiClient.listRecipes(category),
+  })
+}
+
+export function useRecipe(slug: string) {
+  return useQuery({
+    queryKey: marketplaceKeys.recipe(slug),
+    queryFn: () => apiClient.getRecipe(slug),
+    enabled: !!slug,
+  })
+}
+
+export function useRecipeCategories() {
+  return useQuery({
+    queryKey: marketplaceKeys.categories(),
+    queryFn: () => apiClient.getRecipeCategories(),
+  })
+}
+
+export function useValidateDeployment() {
+  return useMutation({
+    mutationFn: ({ slug, data }: { slug: string; data: import('./types').ValidateDeploymentRequest }) =>
+      apiClient.validateDeployment(slug, data),
+  })
+}
+
+export function useRecommendDevice(slug: string) {
+  return useQuery({
+    queryKey: [...marketplaceKeys.recipe(slug), 'recommendations'],
+    queryFn: () => apiClient.recommendDeviceForRecipe(slug),
+    enabled: !!slug,
+  })
+}
+
+// Deployment query keys
+export const deploymentKeys = {
+  all: ['deployments'] as const,
+  lists: () => [...deploymentKeys.all, 'list'] as const,
+  list: (filters: Record<string, any> = {}) =>
+    [...deploymentKeys.lists(), filters] as const,
+  details: () => [...deploymentKeys.all, 'detail'] as const,
+  detail: (id: string) => [...deploymentKeys.details(), id] as const,
+}
+
+// Deployment hooks
+export function useDeployments(deviceId?: string, status?: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time deployment list updates
+  useEffect(() => {
+    const handleDeploymentUpdates = (event: string) => {
+      if (event === 'deployment:status' || event === 'deployment:created' || event === 'deployment:deleted') {
+        // Invalidate all deployment list queries to refetch with updated data
+        queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+      }
+    }
+
+    // Subscribe to deployments channel
+    const unsubscribe = wsService.on('deployments', handleDeploymentUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [queryClient])
+
+  return useQuery({
+    queryKey: deploymentKeys.list({ deviceId, status }),
+    queryFn: () => apiClient.listDeployments(deviceId, status),
+  })
+}
+
+export function useDeployment(id: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time status and logs
+  useEffect(() => {
+    if (!id) return
+
+    const handleDeploymentUpdates = (event: string, data: unknown) => {
+      if (event === 'deployment:status') {
+        const statusUpdate = data as { id: string; status: string; error_details?: string }
+        // Only update if this is our deployment
+        if (statusUpdate.id === id) {
+          queryClient.setQueryData(deploymentKeys.detail(id), (old: any) => ({
+            ...old,
+            status: statusUpdate.status,
+            error_details: statusUpdate.error_details,
+          }))
+        }
+      } else if (event === 'deployment:log') {
+        const logUpdate = data as { id: string; message: string }
+        // Only update if this is our deployment
+        if (logUpdate.id === id) {
+          queryClient.setQueryData(deploymentKeys.detail(id), (old: any) => ({
+            ...old,
+            deployment_logs: (old?.deployment_logs || '') + logUpdate.message,
+          }))
+        }
+      }
+    }
+
+    // Subscribe to deployments channel
+    const unsubscribe = wsService.on('deployments', handleDeploymentUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [id, queryClient])
+
+  return useQuery({
+    queryKey: deploymentKeys.detail(id),
+    queryFn: () => apiClient.getDeployment(id),
+    enabled: !!id,
+    // Reduced polling as fallback (WebSocket is primary)
+    refetchInterval: (query) => {
+      const data = query.state.data as import('./types').Deployment | undefined
+      // Stop polling when deployment is complete or failed
+      if (data?.status === 'running' || data?.status === 'failed') {
+        return false
+      }
+      // Poll every 10 seconds as fallback (WebSocket should be faster)
+      return 10000
+    },
+  })
+}
+
+export function useCreateDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: import('./types').CreateDeploymentRequest) =>
+      apiClient.createDeployment(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
+export function useDeleteDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteDeployment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
+export function useCancelDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.cancelDeployment(id),
+    onSuccess: (_, id) => {
+      // Invalidate the specific deployment and lists to refetch with updated status
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}

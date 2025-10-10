@@ -18,6 +18,12 @@ import type {
   Volume,
   CreateVolumeRequest,
   SoftwareUpdateInfo,
+  Recipe,
+  ValidationResult,
+  ValidateDeploymentRequest,
+  DeviceScore,
+  Deployment,
+  CreateDeploymentRequest,
 } from './types'
 import { useAuthStore } from '../stores/authStore'
 
@@ -295,6 +301,74 @@ class APIClient {
         method: 'DELETE',
       }
     )
+  }
+
+  // Marketplace API
+  async listRecipes(category?: string): Promise<Recipe[]> {
+    const params = category ? `?category=${encodeURIComponent(category)}` : ''
+    return this.request<Recipe[]>(`/marketplace/recipes${params}`)
+  }
+
+  async getRecipe(slug: string): Promise<Recipe> {
+    return this.request<Recipe>(`/marketplace/recipes/${slug}`)
+  }
+
+  async validateDeployment(
+    slug: string,
+    data: ValidateDeploymentRequest
+  ): Promise<ValidationResult> {
+    return this.request<ValidationResult>(
+      `/marketplace/recipes/${slug}/validate`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  }
+
+  async getRecipeCategories(): Promise<string[]> {
+    return this.request<string[]>('/marketplace/categories')
+  }
+
+  async recommendDeviceForRecipe(slug: string): Promise<DeviceScore[]> {
+    return this.request<DeviceScore[]>(
+      `/marketplace/recipes/${slug}/recommend-device`,
+      {
+        method: 'POST',
+      }
+    )
+  }
+
+  // Deployment API
+  async createDeployment(data: CreateDeploymentRequest): Promise<Deployment> {
+    return this.request<Deployment>('/deployments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async getDeployment(id: string): Promise<Deployment> {
+    return this.request<Deployment>(`/deployments/${id}`)
+  }
+
+  async listDeployments(deviceId?: string, status?: string): Promise<Deployment[]> {
+    const params = new URLSearchParams()
+    if (deviceId) params.append('device_id', deviceId)
+    if (status) params.append('status', status)
+    const queryString = params.toString()
+    return this.request<Deployment[]>(`/deployments${queryString ? `?${queryString}` : ''}`)
+  }
+
+  async deleteDeployment(id: string): Promise<void> {
+    return this.request<void>(`/deployments/${id}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async cancelDeployment(id: string): Promise<void> {
+    return this.request<void>(`/deployments/${id}/cancel`, {
+      method: 'POST',
+    })
   }
 }
 

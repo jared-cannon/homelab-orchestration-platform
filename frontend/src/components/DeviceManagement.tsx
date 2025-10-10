@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info, ArrowUp } from 'lucide-react'
+import { Package, HardDrive, Database, Plus, Trash2, Loader2, RefreshCw, Info, ArrowUp, Rocket } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card } from './ui/card'
 import { apiClient, APIError } from '../api/client'
@@ -10,13 +10,17 @@ import type {
   CreateVolumeRequest,
   VolumeType,
   SoftwareUpdateInfo,
+  DeploymentStatus,
 } from '../api/types'
+import { Badge } from './ui/badge'
+import { useNavigate } from 'react-router-dom'
+import { deploymentKeys } from '../api/hooks'
 
 interface DeviceManagementProps {
   deviceId: string
 }
 
-type Tab = 'software' | 'nfs' | 'volumes'
+type Tab = 'software' | 'nfs' | 'volumes' | 'deployments'
 
 export function DeviceManagement({ deviceId }: DeviceManagementProps) {
   const [activeTab, setActiveTab] = useState<Tab>('software')
@@ -72,12 +76,26 @@ export function DeviceManagement({ deviceId }: DeviceManagementProps) {
               Docker Volumes
             </div>
           </button>
+          <button
+            onClick={() => setActiveTab('deployments')}
+            className={`px-4 py-2 font-medium transition-colors ${
+              activeTab === 'deployments'
+                ? 'text-primary border-b-2 border-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Rocket className="w-4 h-4" />
+              Deployments
+            </div>
+          </button>
         </div>
 
         {/* Tab Content */}
         {activeTab === 'software' && <SoftwareTab deviceId={deviceId} />}
         {activeTab === 'nfs' && <NFSTab deviceId={deviceId} />}
         {activeTab === 'volumes' && <VolumesTab deviceId={deviceId} />}
+        {activeTab === 'deployments' && <DeploymentsTab deviceId={deviceId} />}
       </div>
     </Card>
   )
@@ -747,6 +765,133 @@ function VolumesTab({ deviceId }: { deviceId: string }) {
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// Deployments Tab
+function DeploymentsTab({ deviceId }: { deviceId: string }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const { data: deployments = [], isLoading } = useQuery({
+    queryKey: deploymentKeys.list({ deviceId }),
+    queryFn: () => apiClient.listDeployments(deviceId),
+  })
+
+  const deleteDeployment = useMutation({
+    mutationFn: (id: string) => apiClient.deleteDeployment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] })
+      toast.success('Deployment deleted successfully')
+    },
+    onError: (error: Error) => {
+      toast.error('Failed to delete deployment', { description: error.message })
+    },
+  })
+
+  const getStatusBadge = (status: DeploymentStatus) => {
+    const config: Record<DeploymentStatus, { label: string; variant: 'default' | 'secondary' | 'success' | 'warning' | 'danger' }> = {
+      validating: { label: 'Validating', variant: 'secondary' },
+      preparing: { label: 'Preparing', variant: 'secondary' },
+      deploying: { label: 'Deploying', variant: 'default' },
+      configuring: { label: 'Configuring', variant: 'default' },
+      health_check: { label: 'Health Check', variant: 'default' },
+      running: { label: 'Running', variant: 'success' },
+      stopped: { label: 'Stopped', variant: 'warning' },
+      failed: { label: 'Failed', variant: 'danger' },
+      rolling_back: { label: 'Rolling Back', variant: 'danger' },
+      rolled_back: { label: 'Rolled Back', variant: 'warning' },
+    }
+
+    const { label, variant } = config[status] || { label: status, variant: 'secondary' as const }
+
+    return (
+      <Badge variant={variant} className="w-fit">
+        {label}
+      </Badge>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (deployments.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <Rocket className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+        <p className="text-sm text-muted-foreground mb-2">No deployments on this device</p>
+        <p className="text-xs text-muted-foreground mb-4">
+          Deploy an app from the marketplace to get started
+        </p>
+        <button
+          onClick={() => navigate('/marketplace')}
+          className="px-4 py-2 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+        >
+          Browse Marketplace
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {deployments.map((deployment) => (
+        <div
+          key={deployment.id}
+          className="p-4 bg-card border border-border rounded-lg hover:bg-accent/50 transition-colors"
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <h4 className="font-medium">{deployment.recipe_name}</h4>
+                {getStatusBadge(deployment.status)}
+              </div>
+              <p className="text-xs text-muted-foreground mb-1">
+                Recipe: {deployment.recipe_slug}
+              </p>
+              {deployment.deployed_at && (
+                <p className="text-xs text-muted-foreground">
+                  Deployed: {new Date(deployment.deployed_at).toLocaleString()}
+                </p>
+              )}
+              {deployment.error_details && (
+                <p className="text-xs text-danger mt-2">{deployment.error_details}</p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/deployments')}
+                className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+                title="View all deployments"
+              >
+                <Rocket className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => deleteDeployment.mutate(deployment.id)}
+                disabled={deleteDeployment.isPending}
+                className="p-2 text-destructive hover:bg-destructive/10 rounded disabled:opacity-50 transition-colors"
+                title="Delete deployment"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="pt-2">
+        <button
+          onClick={() => navigate('/deployments')}
+          className="w-full text-center text-sm text-primary hover:underline"
+        >
+          View all deployments →
+        </button>
+      </div>
     </div>
   )
 }
