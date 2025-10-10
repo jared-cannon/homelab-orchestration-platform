@@ -1,18 +1,35 @@
 # Homelab Orchestration Platform
 
-**Make self-hosting as simple as signing up for a SaaS product**
+A centralized dashboard for managing your homelab without the headache.
 
-Version: 0.1.0 MVP (Phase 0 Complete)
+> **Note:** This is a personal project I'm building as I set up my own homelab. It's in early development and things will change as I figure out what works. Contributions and feedback are welcome!
 
-## Philosophy
+## What is this?
 
-Inspired by Laravel Herd's approach to developer experience:
-- Complexity hidden, not removed
-- Convention over configuration
-- One-click operations
-- Beautiful, native-feeling UI
-- Reversible actions
-- Escape hatches everywhere
+Managing a homelab shouldn't require a PhD in DevOps. This project aims to make self-hosting as simple as signing up for a SaaS product - automatically discover devices on your network, get opinionated recommendations for what to run where, and deploy apps without diving into config files.
+
+**Key ideas:**
+- **Auto-discovery**: Scan your network and detect servers, NAS devices, Raspberry Pis, etc.
+- **Smart recommendations**: Get app suggestions based on each device's available resources
+- **Opinionated setup**: Sensible defaults that just work, with escape hatches when you need them
+- **App marketplace**: Browse and deploy open-source apps with one click
+- **Centralized view**: See your entire homelab at a glance
+- **Encrypted backups**: Backup to cloud providers or local network storage
+- **Low barrier to entry**: You shouldn't need to be a sysadmin to host your own services
+
+The philosophy is simple: hide complexity, don't remove it. Everything should be reversible, and you should always have an escape hatch to the underlying tools if you need them.
+
+## How is this different from Coolify/Portainer/etc?
+
+This isn't trying to replace those tools. Instead, it's focused on the broader homelab experience:
+
+- **Multi-device orchestration**: Most tools focus on a single server. This is built for managing multiple devices at once (your main server, that old laptop, a couple of Raspberry Pis, etc.)
+- **Discovery-first**: Automatically find what's on your network instead of manually adding everything
+- **Resource-aware**: Smart recommendations about which device should run what based on available CPU/RAM/storage
+- **Homelab-specific features**: Built-in encrypted backups, network-wide monitoring, and other features that matter when you're running your own infrastructure
+- **Opinionated by default**: Less "here are 50 config options" and more "this will just work, but you can change it if you want"
+
+Think of it as the layer above your deployment tools - helping you figure out what to run where, keeping everything backed up, and giving you a single pane of glass for your entire setup.
 
 ## Quick Start
 
@@ -87,40 +104,25 @@ make clean             # Clean build artifacts
 make install-deps      # Install all dependencies
 ```
 
-## Phase 0 Status ✅
+## Current Status
 
-**Complete!** Can run development servers with full hot-reload.
+The foundation is in place - you can spin up the dev environment and start poking around. Core features like device scanning, the app marketplace, and backup management are being actively developed.
 
-- [x] Monorepo structure
-- [x] Go backend with Fiber
-- [x] React frontend with Vite
-- [x] Health check endpoint
-- [x] Backend tests
-- [x] API proxy configuration
-- [x] Unified development workflow
-
-**Next**: Phase 1 - Core Infrastructure (Device management, SSH, Docker validation)
-
-## Documentation
-
-See [docs/architecture.md](docs/architecture.md) for full architecture details.
+Check [docs/architecture.md](docs/architecture.md) for more technical details on how things are structured.
 
 ## Tech Stack
 
 **Backend**:
-- Go 1.25.2
-- Fiber v2 (web framework)
-- GORM (will be added in Phase 1)
+- Go 1.25.2 with Fiber v2
+- GORM (being integrated)
 
 **Frontend**:
-- React 18
-- TypeScript
-- Vite
-- TanStack Query (will be added in Phase 1)
+- React 18 + TypeScript + Vite
+- TanStack Query (being integrated)
 
 ## Contributing
 
-This project is in early development (Phase 0). See `docs/architecture.md` for the development roadmap.
+This is a personal project that's being actively developed, but I'm open to contributions! If you want to help out or have ideas, feel free to open an issue or PR. Just keep in mind that things are still pretty fluid as I nail down the exact direction.
 
 ## License
 
