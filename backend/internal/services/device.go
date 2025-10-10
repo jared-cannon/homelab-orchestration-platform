@@ -194,8 +194,8 @@ func (s *DeviceService) TestConnection(id uuid.UUID) (map[string]interface{}, er
 		return nil, err
 	}
 
-	// Get credentials
-	creds, err := s.credService.GetCredentials(id.String())
+	// Get credentials (handles both DB and keychain sources)
+	creds, err := s.GetDeviceCredentials(id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}

@@ -13,15 +13,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './ui/dialog'
-import { Input } from './ui/input'
-import { Label } from './ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select'
+import { CredentialsForm } from './CredentialsForm'
+import { Badge } from './ui/badge'
 
 type WizardStep = 'scan' | 'credentials' | 'complete'
 
@@ -30,8 +23,9 @@ export function DeviceDiscoveryWizard() {
   const [step, setStep] = useState<WizardStep>('scan')
   const [scanId, setScanId] = useState<string | null>(null)
   const [selectedDevices, setSelectedDevices] = useState<Set<string>>(new Set())
+  const [showAlreadyAdded, setShowAlreadyAdded] = useState(true)
   const [credentials, setCredentials] = useState<DeviceCredentials>({
-    type: 'password',
+    type: 'auto',
     username: '',
     password: '',
     ssh_key: '',
@@ -80,8 +74,12 @@ export function DeviceDiscoveryWizard() {
   const handleAddDevices = async () => {
     if (!scanProgress) return
 
-    const devicesToAdd = scanProgress.devices.filter((device) =>
-      selectedDevices.has(device.ip_address)
+    // Filter out already-added devices
+    const devicesToAdd = scanProgress.devices.filter(
+      (device) =>
+        selectedDevices.has(device.ip_address) &&
+        !device.already_added &&
+        device.status !== 'already_added'
     )
 
     let successCount = 0
@@ -119,8 +117,9 @@ export function DeviceDiscoveryWizard() {
       setStep('scan')
       setScanId(null)
       setSelectedDevices(new Set())
+      setShowAlreadyAdded(true)
       setCredentials({
-        type: 'password',
+        type: 'auto',
         username: '',
         password: '',
         ssh_key: '',
@@ -217,51 +216,84 @@ export function DeviceDiscoveryWizard() {
 
             {/* Device list */}
             {scanProgress.devices.length > 0 && (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {scanProgress.devices.map((device) => (
-                  <div
-                    key={device.ip_address}
-                    onClick={() => handleDeviceSelect(device.ip_address)}
-                    className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors hover:bg-accent ${
-                      selectedDevices.has(device.ip_address)
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border'
-                    }`}
-                  >
-                    <div
-                      className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center ${
-                        selectedDevices.has(device.ip_address)
-                          ? 'bg-primary border-primary'
-                          : 'border-muted-foreground'
-                      }`}
+              <div className="space-y-3">
+                {/* Toggle for already-added devices */}
+                {scanProgress.devices.some((d) => d.already_added) && (
+                  <div className="flex items-center justify-between pb-2 border-b">
+                    <p className="text-sm text-muted-foreground">
+                      {scanProgress.devices.filter((d) => d.already_added).length} already added
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowAlreadyAdded(!showAlreadyAdded)}
+                      className="text-xs h-7"
                     >
-                      {selectedDevices.has(device.ip_address) && (
-                        <CheckCircle2 className="w-3 h-3 text-primary-foreground" />
-                      )}
-                    </div>
-                    <Server className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">
-                        {device.hostname || 'Unknown'}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {device.ip_address}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {device.ssh_available && (
-                        <span className="text-xs bg-success/10 text-success px-2 py-1 rounded">
-                          SSH
-                        </span>
-                      )}
-                      {device.docker_detected && (
-                        <span className="text-xs bg-accent/10 text-accent px-2 py-1 rounded">
-                          Docker
-                        </span>
-                      )}
-                    </div>
+                      {showAlreadyAdded ? 'Hide' : 'Show'} Added
+                    </Button>
                   </div>
-                ))}
+                )}
+
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {scanProgress.devices
+                    .filter((device) => showAlreadyAdded || !device.already_added)
+                    .map((device) => {
+                      const isAlreadyAdded = device.already_added || device.status === 'already_added'
+                      return (
+                        <div
+                          key={device.ip_address}
+                          onClick={() => !isAlreadyAdded && handleDeviceSelect(device.ip_address)}
+                          className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${
+                            isAlreadyAdded
+                              ? 'opacity-50 cursor-not-allowed'
+                              : 'cursor-pointer hover:bg-accent'
+                          } ${
+                            selectedDevices.has(device.ip_address)
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border'
+                          }`}
+                        >
+                          <div
+                            className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center ${
+                              selectedDevices.has(device.ip_address) && !isAlreadyAdded
+                                ? 'bg-primary border-primary'
+                                : 'border-muted-foreground'
+                            }`}
+                          >
+                            {selectedDevices.has(device.ip_address) && !isAlreadyAdded && (
+                              <CheckCircle2 className="w-3 h-3 text-primary-foreground" />
+                            )}
+                          </div>
+                          <Server className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">
+                              {device.hostname || 'Unknown'}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {device.ip_address}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {isAlreadyAdded && (
+                              <Badge variant="secondary" className="text-xs">
+                                Added
+                              </Badge>
+                            )}
+                            {device.ssh_available && !isAlreadyAdded && (
+                              <span className="text-xs bg-success/10 text-success px-2 py-1 rounded">
+                                SSH
+                              </span>
+                            )}
+                            {device.docker_detected && !isAlreadyAdded && (
+                              <span className="text-xs bg-accent/10 text-accent px-2 py-1 rounded">
+                                Docker
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
               </div>
             )}
           </div>
@@ -291,81 +323,11 @@ export function DeviceDiscoveryWizard() {
       </DialogHeader>
 
       <div className="space-y-4 py-4">
-        <div className="grid gap-2">
-          <Label htmlFor="auth-type">Authentication Method</Label>
-          <Select
-            value={credentials.type}
-            onValueChange={(value: 'password' | 'ssh_key') =>
-              setCredentials({ ...credentials, type: value })
-            }
-          >
-            <SelectTrigger id="auth-type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="password">Password</SelectItem>
-              <SelectItem value="ssh_key">SSH Key</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="username">Username</Label>
-          <Input
-            id="username"
-            value={credentials.username}
-            onChange={(e) =>
-              setCredentials({ ...credentials, username: e.target.value })
-            }
-            placeholder="root"
-            required
-          />
-        </div>
-
-        {credentials.type === 'password' ? (
-          <div className="grid gap-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={credentials.password}
-              onChange={(e) =>
-                setCredentials({ ...credentials, password: e.target.value })
-              }
-              required
-            />
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-2">
-              <Label htmlFor="ssh-key">SSH Private Key</Label>
-              <textarea
-                id="ssh-key"
-                value={credentials.ssh_key}
-                onChange={(e) =>
-                  setCredentials({ ...credentials, ssh_key: e.target.value })
-                }
-                className="min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                placeholder="Paste your private key here"
-                required
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="key-passphrase">Key Passphrase (Optional)</Label>
-              <Input
-                id="key-passphrase"
-                type="password"
-                value={credentials.ssh_key_passwd}
-                onChange={(e) =>
-                  setCredentials({
-                    ...credentials,
-                    ssh_key_passwd: e.target.value,
-                  })
-                }
-              />
-            </div>
-          </>
-        )}
+        <CredentialsForm
+          credentials={credentials}
+          onChange={setCredentials}
+          idPrefix="discovery"
+        />
       </div>
 
       <DialogFooter>

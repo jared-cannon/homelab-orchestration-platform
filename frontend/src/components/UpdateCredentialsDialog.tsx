@@ -11,15 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog'
-import { Input } from './ui/input'
-import { Label } from './ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select'
+import { CredentialsForm } from './CredentialsForm'
 
 interface UpdateCredentialsDialogProps {
   device: Device
@@ -149,103 +141,11 @@ export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCr
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="cred-auth-type">Login Method</Label>
-              <Select
-                value={formData.type}
-                onValueChange={(value: 'auto' | 'password' | 'ssh_key') =>
-                  setFormData({
-                    ...formData,
-                    type: value,
-                  })
-                }
-              >
-                <SelectTrigger id="cred-auth-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Use My SSH Key (Recommended)</SelectItem>
-                  <SelectItem value="password">Password</SelectItem>
-                  <SelectItem value="ssh_key">Security Key</SelectItem>
-                </SelectContent>
-              </Select>
-              {formData.type === 'auto' && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Will use your default SSH key or SSH agent - no credentials stored
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="cred-username">Username</Label>
-              <Input
-                id="cred-username"
-                value={formData.username}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    username: e.target.value,
-                  })
-                }
-                placeholder="root"
-                required
-              />
-            </div>
-
-            {formData.type === 'password' && (
-              <div className="grid gap-2">
-                <Label htmlFor="cred-password">Password</Label>
-                <Input
-                  id="cred-password"
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      password: e.target.value,
-                    })
-                  }
-                  required
-                />
-              </div>
-            )}
-
-            {formData.type === 'ssh_key' && (
-              <>
-                <div className="grid gap-2">
-                  <Label htmlFor="cred-ssh-key">Security Key</Label>
-                  <textarea
-                    id="cred-ssh-key"
-                    value={formData.ssh_key}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        ssh_key: e.target.value,
-                      })
-                    }
-                    className="min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    placeholder="Paste your private key here"
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cred-key-passphrase">
-                    Key Password (Optional)
-                  </Label>
-                  <Input
-                    id="cred-key-passphrase"
-                    type="password"
-                    value={formData.ssh_key_passwd}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        ssh_key_passwd: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-              </>
-            )}
+            <CredentialsForm
+              credentials={formData}
+              onChange={setFormData}
+              idPrefix="update-cred"
+            />
 
             <div className="pt-4 border-t">
               <Button
