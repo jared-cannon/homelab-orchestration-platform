@@ -1,13 +1,17 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { BookOpen } from 'lucide-react'
 import { useDevices } from '../api/hooks'
 import { AddDeviceDialog } from '../components/AddDeviceDialog'
 import { DeviceDiscoveryWizard } from '../components/DeviceDiscoveryWizard'
 import { FirstRunWizard } from '../components/FirstRunWizard'
 import { DeviceHealthCard } from '../components/DeviceHealthCard'
+import { ServerSetupGuide } from '../components/ServerSetupGuide'
+import { Button } from '../components/ui/button'
 
 export function DevicesPage() {
   const { data: devices, isLoading, error } = useDevices()
+  const [showSetupGuide, setShowSetupGuide] = useState(false)
 
   // Show toast notification when device loading fails
   useEffect(() => {
@@ -56,6 +60,15 @@ export function DevicesPage() {
               </p>
             </div>
             <div className="flex gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowSetupGuide(true)}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <BookOpen className="mr-2 h-4 w-4" />
+                Setup Guide
+              </Button>
               <DeviceDiscoveryWizard />
               <AddDeviceDialog />
             </div>
@@ -112,6 +125,8 @@ export function DevicesPage() {
           ))}
         </div>
       </div>
+
+      <ServerSetupGuide open={showSetupGuide} onOpenChange={setShowSetupGuide} />
     </div>
   )
 }
