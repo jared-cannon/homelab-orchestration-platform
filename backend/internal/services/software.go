@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
@@ -11,19 +12,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// sshExecutor is an interface for SSH command execution (allows mocking in tests)
+type sshExecutor interface {
+	Execute(host, command string) (string, error)
+	ExecuteWithTimeout(host, command string, timeout time.Duration) (string, error)
+}
+
 // SoftwareService handles software installation and management
 type SoftwareService struct {
 	db        *gorm.DB
-	sshClient *ssh.Client
+	sshClient sshExecutor // Use interface instead of concrete type
 	registry  *SoftwareRegistry
+	wsHub     WSHub
 }
 
 // NewSoftwareService creates a new software service
-func NewSoftwareService(db *gorm.DB, sshClient *ssh.Client, registry *SoftwareRegistry) *SoftwareService {
+func NewSoftwareService(db *gorm.DB, sshClient *ssh.Client, registry *SoftwareRegistry, wsHub WSHub) *SoftwareService {
 	return &SoftwareService{
 		db:        db,
-		sshClient: sshClient,
+		sshClient: sshClient, // *ssh.Client implements sshExecutor
 		registry:  registry,
+		wsHub:     wsHub,
 	}
 }
 
@@ -268,7 +277,8 @@ func (s *SoftwareService) InstallNFSClient(deviceID uuid.UUID) (*models.Installe
 
 // ListInstalled lists all installed software on a device
 func (s *SoftwareService) ListInstalled(deviceID uuid.UUID) ([]models.InstalledSoftware, error) {
-	var software []models.InstalledSoftware
+	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
+	software := make([]models.InstalledSoftware, 0)
 	err := s.db.Where("device_id = ?", deviceID).Find(&software).Error
 	return software, err
 }
@@ -284,6 +294,24 @@ func (s *SoftwareService) DetectInstalled(deviceID uuid.UUID) ([]models.Installe
 
 	log.Printf("[Software] Detecting installed software on %s", device.Name)
 
+	// First, get all currently recorded installed software from database
+	var currentlyRecorded []models.InstalledSoftware
+	if err := s.db.Where("device_id = ?", deviceID).Find(&currentlyRecorded).Error; err != nil {
+		log.Printf("[Software] Warning: failed to query existing records: %v", err)
+	}
+
+	// Check each recorded software to see if it's still installed
+	// Remove records for software that is no longer installed
+	for _, recorded := range currentlyRecorded {
+		installed, _, _ := s.IsInstalled(host, recorded.Name)
+		if !installed {
+			log.Printf("[Software] %s is no longer installed on %s, removing database record", recorded.Name, device.Name)
+			if err := s.db.Delete(&recorded).Error; err != nil {
+				log.Printf("[Software] Warning: failed to remove record for %s: %v", recorded.Name, err)
+			}
+		}
+	}
+
 	// Check all known software types
 	softwareTypes := []models.SoftwareType{
 		models.SoftwareDocker,
@@ -291,7 +319,8 @@ func (s *SoftwareService) DetectInstalled(deviceID uuid.UUID) ([]models.Installe
 		models.SoftwareNFSClient,
 	}
 
-	var detected []models.InstalledSoftware
+	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
+	detected := make([]models.InstalledSoftware, 0)
 
 	for _, softwareType := range softwareTypes {
 		installed, version, _ := s.IsInstalled(host, softwareType)
@@ -302,7 +331,12 @@ func (s *SoftwareService) DetectInstalled(deviceID uuid.UUID) ([]models.Installe
 			var existing models.InstalledSoftware
 			err := s.db.Where("device_id = ? AND name = ?", deviceID, softwareType).First(&existing).Error
 			if err == nil {
-				// Already exists, just add to results
+				// Already exists, update version if changed
+				if existing.Version != version {
+					existing.Version = version
+					s.db.Save(&existing)
+					log.Printf("[Software] Updated version for %s: %s", softwareType, version)
+				}
 				detected = append(detected, existing)
 				continue
 			}
@@ -346,7 +380,8 @@ func (s *SoftwareService) CheckUpdates(deviceID uuid.UUID) ([]models.SoftwareUpd
 
 	log.Printf("[Software] Checking updates for %d packages on %s", len(installedSoftware), device.Name)
 
-	var updateInfo []models.SoftwareUpdateInfo
+	// Initialize as empty slice (not nil) to ensure JSON serializes as [] not null
+	updateInfo := make([]models.SoftwareUpdateInfo, 0)
 
 	for _, software := range installedSoftware {
 		// Get software definition
@@ -411,6 +446,15 @@ func (s *SoftwareService) UpdateSoftware(deviceID uuid.UUID, softwareName models
 		return nil, fmt.Errorf("no update command defined for %s", softwareName)
 	}
 
+	// Check for passwordless sudo if update command contains sudo
+	if strings.Contains(def.Commands.Update, "sudo") {
+		_, testErr := s.sshClient.Execute(host, "sudo -n true")
+		if testErr != nil {
+			log.Printf("[Software] Passwordless sudo check failed for update on %s", device.Name)
+			return nil, models.NewSudoError(device.IPAddress)
+		}
+	}
+
 	_, err = s.sshClient.Execute(host, def.Commands.Update)
 	if err != nil {
 		return nil, fmt.Errorf("update failed: %w", err)
@@ -436,14 +480,12 @@ func (s *SoftwareService) UpdateSoftware(deviceID uuid.UUID, softwareName models
 	return &existing, nil
 }
 
-// Install installs software using the plugin system (registry-based)
-func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.SoftwareType, options map[string]interface{}) (*models.InstalledSoftware, error) {
+// Install installs software using the plugin system (registry-based) - async version
+func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.SoftwareType, options map[string]interface{}) (*models.SoftwareInstallation, error) {
 	device, err := s.getDevice(deviceID)
 	if err != nil {
 		return nil, err
 	}
-
-	host := device.IPAddress + ":22"
 
 	// Get software definition from registry
 	def, err := s.registry.GetDefinition(string(softwareName))
@@ -451,18 +493,47 @@ func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.Softwa
 		return nil, fmt.Errorf("software definition not found: %w", err)
 	}
 
+	// Create installation record
+	installation := &models.SoftwareInstallation{
+		DeviceID:     deviceID,
+		SoftwareName: softwareName,
+		Status:       models.InstallationStatusPending,
+	}
+
+	if err := s.db.Create(installation).Error; err != nil {
+		return nil, fmt.Errorf("failed to create installation record: %w", err)
+	}
+
+	// Start installation in background
+	go s.executeInstallation(installation, device, def, options)
+
+	return installation, nil
+}
+
+// executeInstallation performs the actual installation with logging
+func (s *SoftwareService) executeInstallation(installation *models.SoftwareInstallation, device *models.Device, def *models.SoftwareDefinition, options map[string]interface{}) {
+	// Panic recovery to prevent crashing the entire application
+	defer func() {
+		if r := recover(); r != nil {
+			errorMsg := fmt.Sprintf("Installation panic: %v", r)
+			log.Printf("[Software] PANIC during installation: %v", r)
+			s.appendInstallLog(installation, fmt.Sprintf("❌ Critical error: %v", r))
+			s.updateInstallStatus(installation, models.InstallationStatusFailed, errorMsg)
+		}
+	}()
+
+	host := device.IPAddress + ":22"
+	softwareName := installation.SoftwareName
+
+	s.appendInstallLog(installation, fmt.Sprintf("▶ Starting installation of %s on device %s (%s)", def.Name, device.Name, device.IPAddress))
+	s.updateInstallStatus(installation, models.InstallationStatusInstalling, "")
+
 	// Check if already installed
 	if def.Commands.CheckInstalled != "" {
+		s.appendInstallLog(installation, "▶ Checking if already installed...")
 		output, err := s.sshClient.Execute(host, def.Commands.CheckInstalled)
 		if err == nil && strings.TrimSpace(output) != "" {
-			log.Printf("[Software] %s already installed on %s", def.Name, device.Name)
-
-			// Return existing record or create one
-			var existing models.InstalledSoftware
-			err := s.db.Where("device_id = ? AND name = ?", deviceID, softwareName).First(&existing).Error
-			if err == nil {
-				return &existing, nil
-			}
+			s.appendInstallLog(installation, fmt.Sprintf("⚠️  %s is already installed", def.Name))
 
 			// Get version
 			version := strings.TrimSpace(output)
@@ -473,54 +544,83 @@ func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.Softwa
 				}
 			}
 
-			// Create record for existing installation
+			// Create InstalledSoftware record (check for errors to ensure data consistency)
 			software := &models.InstalledSoftware{
-				DeviceID:    deviceID,
+				DeviceID:    device.ID,
 				Name:        softwareName,
 				Version:     version,
 				InstalledBy: "detected",
 			}
+
 			if err := s.db.Create(software).Error; err != nil {
-				return nil, fmt.Errorf("failed to record software: %w", err)
+				s.appendInstallLog(installation, fmt.Sprintf("❌ Failed to record installation in database: %v", err))
+				s.updateInstallStatus(installation, models.InstallationStatusFailed, fmt.Sprintf("database error: %v", err))
+				return
 			}
-			return software, nil
+
+			s.appendInstallLog(installation, fmt.Sprintf("✓ Installation complete: %s (detected version %s)", def.Name, version))
+			s.updateInstallStatus(installation, models.InstallationStatusSuccess, "")
+			return
 		}
 	}
 
-	log.Printf("[Software] Installing %s on %s using plugin system", def.Name, device.Name)
-
 	// Check for passwordless sudo if install command contains sudo
 	if strings.Contains(def.Commands.Install, "sudo") {
-		log.Printf("[Software] Checking passwordless sudo access...")
+		s.appendInstallLog(installation, "▶ Checking passwordless sudo access...")
 		_, testErr := s.sshClient.Execute(host, "sudo -n true")
 		if testErr != nil {
-			log.Printf("[Software] Passwordless sudo check failed: %v", testErr)
-			return nil, models.NewSudoError(device.IPAddress)
+			s.appendInstallLog(installation, "❌ Passwordless sudo check failed")
+			s.updateInstallStatus(installation, models.InstallationStatusFailed, "Passwordless sudo not configured. Please configure passwordless sudo for the SSH user.")
+			return
 		}
-		log.Printf("[Software] Passwordless sudo confirmed")
+		s.appendInstallLog(installation, "✓ Passwordless sudo confirmed")
 	}
 
 	// Run install command
 	if def.Commands.Install == "" {
-		return nil, fmt.Errorf("no install command defined for %s", softwareName)
+		s.appendInstallLog(installation, "❌ No install command defined")
+		s.updateInstallStatus(installation, models.InstallationStatusFailed, "No install command defined for this software")
+		return
 	}
 
-	log.Printf("[Software] Running install command: %s", def.Commands.Install)
-	output, err := s.sshClient.Execute(host, def.Commands.Install)
+	s.appendInstallLog(installation, "▶ Running installation command (this may take several minutes)...")
+	_, err := s.sshClient.ExecuteWithTimeout(host, def.Commands.Install, 15*time.Minute)
 	if err != nil {
-		log.Printf("[Software] Install command failed. Output: %s", output)
-		log.Printf("[Software] Install command error: %v", err)
-		return nil, fmt.Errorf("installation failed: %w (output: %s)", err, output)
+		s.appendInstallLog(installation, fmt.Sprintf("❌ Installation failed: %v", err))
+		s.updateInstallStatus(installation, models.InstallationStatusFailed, fmt.Sprintf("Installation command failed: %v", err))
+		return
 	}
-	log.Printf("[Software] Install command succeeded. Output: %s", output)
+	s.appendInstallLog(installation, "✓ Installation command completed successfully")
 
 	// Run post-install hook if defined
 	if def.Commands.PostInstall != "" {
-		log.Printf("[Software] Running post-install hook for %s", def.Name)
-		_, err = s.sshClient.Execute(host, def.Commands.PostInstall)
+		s.appendInstallLog(installation, "▶ Running post-installation tasks...")
+
+		// Replace $USER placeholder with actual username from device
+		postInstallCmd := def.Commands.PostInstall
+		if device.Username != "" {
+			postInstallCmd = strings.ReplaceAll(postInstallCmd, "$USER", device.Username)
+		} else if strings.Contains(postInstallCmd, "$USER") {
+			// Username not available - filter out lines containing $USER
+			var filteredLines []string
+			for _, line := range strings.Split(postInstallCmd, "\n") {
+				if !strings.Contains(line, "$USER") {
+					filteredLines = append(filteredLines, line)
+				}
+			}
+			postInstallCmd = strings.Join(filteredLines, "\n")
+			s.appendInstallLog(installation, "⚠️  Username not available - skipping user group commands")
+		}
+
+		output, err := s.sshClient.Execute(host, postInstallCmd)
 		if err != nil {
-			log.Printf("[Software] Warning: post-install hook failed: %v", err)
+			s.appendInstallLog(installation, fmt.Sprintf("⚠️  Post-install tasks failed (non-fatal): %v", err))
+			if strings.TrimSpace(output) != "" {
+				s.appendInstallLog(installation, fmt.Sprintf("Output: %s", strings.TrimSpace(output)))
+			}
 			// Don't fail the installation if post-install fails
+		} else {
+			s.appendInstallLog(installation, "✓ Post-installation tasks completed")
 		}
 	}
 
@@ -533,21 +633,22 @@ func (s *SoftwareService) Install(deviceID uuid.UUID, softwareName models.Softwa
 		}
 	}
 
-	log.Printf("[Software] %s installed successfully: %s", def.Name, version)
-
-	// Record installation
+	// Create InstalledSoftware record (check for errors to ensure data consistency)
 	software := &models.InstalledSoftware{
-		DeviceID:    deviceID,
+		DeviceID:    device.ID,
 		Name:        softwareName,
 		Version:     version,
 		InstalledBy: "system",
 	}
 
 	if err := s.db.Create(software).Error; err != nil {
-		return nil, fmt.Errorf("failed to record software: %w", err)
+		s.appendInstallLog(installation, fmt.Sprintf("❌ Failed to record installation in database: %v", err))
+		s.updateInstallStatus(installation, models.InstallationStatusFailed, fmt.Sprintf("software installed but database error: %v", err))
+		return
 	}
 
-	return software, nil
+	s.appendInstallLog(installation, fmt.Sprintf("✓ %s installed successfully (version: %s)", def.Name, version))
+	s.updateInstallStatus(installation, models.InstallationStatusSuccess, "")
 }
 
 // ListAvailableSoftware returns all software definitions from the registry
@@ -640,4 +741,84 @@ func (s *SoftwareService) getSSHUsername(device *models.Device) string {
 	// This is a simplified version - in production, retrieve from credentials service
 	// For now, return empty to skip user group addition
 	return ""
+}
+
+// appendInstallLog adds a timestamped log entry to the software installation
+func (s *SoftwareService) appendInstallLog(installation *models.SoftwareInstallation, message string) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	logEntry := fmt.Sprintf("[%s] %s\n", timestamp, message)
+	installation.InstallLogs += logEntry
+
+	// Save logs to database
+	s.db.Model(installation).Update("install_logs", installation.InstallLogs)
+
+	// Broadcast log update via WebSocket (check nil early for efficiency)
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.Broadcast("software", "software:log", map[string]interface{}{
+		"id":      installation.ID,
+		"message": logEntry,
+	})
+}
+
+// updateInstallStatus updates the installation status and broadcasts to WebSocket
+func (s *SoftwareService) updateInstallStatus(installation *models.SoftwareInstallation, status models.SoftwareInstallationStatus, errorDetails string) {
+	installation.Status = status
+	installation.ErrorDetails = errorDetails
+
+	if status == models.InstallationStatusSuccess || status == models.InstallationStatusFailed {
+		now := time.Now()
+		installation.CompletedAt = &now
+	}
+
+	// Save to database
+	s.db.Save(installation)
+
+	// Broadcast status update via WebSocket (check nil early for efficiency)
+	if s.wsHub == nil {
+		return
+	}
+	s.wsHub.Broadcast("software", "software:status", map[string]interface{}{
+		"id":            installation.ID,
+		"status":        installation.Status,
+		"error_details": installation.ErrorDetails,
+	})
+}
+
+// GetInstallation retrieves a software installation by ID
+func (s *SoftwareService) GetInstallation(id uuid.UUID) (*models.SoftwareInstallation, error) {
+	var installation models.SoftwareInstallation
+	if err := s.db.Preload("Device").First(&installation, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &installation, nil
+}
+
+// ListInstallations retrieves all software installations for a device
+func (s *SoftwareService) ListInstallations(deviceID uuid.UUID) ([]models.SoftwareInstallation, error) {
+	installations := make([]models.SoftwareInstallation, 0)
+	err := s.db.Where("device_id = ?", deviceID).
+		Order("created_at DESC").
+		Find(&installations).Error
+	return installations, err
+}
+
+// GetActiveInstallation retrieves the currently active installation for a device (if any)
+func (s *SoftwareService) GetActiveInstallation(deviceID uuid.UUID) (*models.SoftwareInstallation, error) {
+	var installations []models.SoftwareInstallation
+	err := s.db.Where("device_id = ? AND status IN (?)", deviceID, []string{"pending", "installing"}).
+		Order("created_at DESC").
+		Limit(1).
+		Find(&installations).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(installations) == 0 {
+		return nil, nil // No active installation
+	}
+
+	return &installations[0], nil
 }

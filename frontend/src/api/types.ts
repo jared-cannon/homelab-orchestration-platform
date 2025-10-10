@@ -1,7 +1,7 @@
 // TypeScript types for API requests and responses
 // Core models (Device, Application, Deployment) are imported from generated-types
 
-import type { DeviceType } from './generated-types'
+import type { Device, DeviceType } from './generated-types'
 
 // Re-export core types from generated-types for convenience
 export type { Device, DeviceType, DeviceStatus, Application, Deployment, DeploymentStatus } from './generated-types'
@@ -199,6 +199,21 @@ export interface SoftwareUpdateInfo {
   message?: string
 }
 
+// Software Installation types
+export type SoftwareInstallationStatus = 'pending' | 'installing' | 'success' | 'failed'
+
+export interface SoftwareInstallation {
+  id: string
+  device_id: string
+  software_name: SoftwareType
+  status: SoftwareInstallationStatus
+  install_logs?: string
+  error_details?: string
+  created_at: string
+  completed_at?: string
+  device?: Device
+}
+
 // Marketplace types
 export interface Recipe {
   id: string
@@ -256,6 +271,7 @@ export interface ResourceCheck {
   available_storage_gb: number
   storage_sufficient: boolean
   docker_installed: boolean
+  docker_running: boolean
 }
 
 export interface ValidateDeploymentRequest {

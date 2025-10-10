@@ -1,29 +1,85 @@
 @import "tailwindcss";
 
 :root {
-  /* Modern indigo/slate palette inspired by Laravel Herd */
-  --background: 210 20% 98%;  /* Slate-50 */
-  --foreground: 222.2 47.4% 11.2%;  /* Slate-900 */
-  --card: 0 0% 100%;  /* Pure white */
-  --card-foreground: 222.2 47.4% 11.2%;
+  /* Shadcn default variables with indigo brand colors */
+  --background: 0 0% 100%;  /* Pure white */
+  --foreground: 222.2 84% 4.9%;  /* Near black - excellent contrast */
+
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 47.4% 11.2%;
-  --primary: 238.7 83.5% 66.7%;  /* Indigo-500 */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 214.3 31.8% 91.4%;  /* Slate-200 */
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 220 14.3% 95.9%;  /* Slate-100 */
-  --muted-foreground: 220 8.9% 46.1%;  /* Slate-600 */
-  --accent: 217.2 91.2% 59.8%;  /* Blue-500 */
-  --accent-foreground: 0 0% 100%;
-  --destructive: 0 84.2% 60.2%;  /* Rose-500 */
-  --destructive-foreground: 0 0% 100%;
-  --success: 142.1 76.2% 36.3%;  /* Emerald-600 */
+  --popover-foreground: 222.2 84% 4.9%;
+
+  --primary: 221.2 83.2% 53.3%;  /* Indigo-600 - vibrant, accessible */
+  --primary-foreground: 210 40% 98%;  /* Off-white for better readability */
+
+  --secondary: 210 40% 96.1%;  /* Light gray */
+  --secondary-foreground: 222.2 47.4% 11.2%;  /* Dark text */
+
+  --muted: 210 40% 96.1%;  /* Light gray background */
+  --muted-foreground: 215.4 16.3% 46.9%;  /* Medium gray - WCAG AA compliant */
+
+  --accent: 210 40% 96.1%;  /* Light accent background */
+  --accent-foreground: 222.2 47.4% 11.2%;  /* Dark accent text */
+
+  --destructive: 0 84.2% 60.2%;  /* Red for errors */
+  --destructive-foreground: 210 40% 98%;
+
+  --success: 142.1 76.2% 36.3%;  /* Green for success */
   --success-foreground: 0 0% 100%;
-  --border: 214.3 31.8% 91.4%;  /* Slate-200 */
-  --input: 214.3 31.8% 91.4%;
-  --ring: 238.7 83.5% 66.7%;  /* Indigo-500 */
-  --radius: 0.75rem;  /* Larger, more modern radius */
+
+  --border: 214.3 31.8% 91.4%;  /* Subtle borders */
+  --input: 214.3 31.8% 91.4%;  /* Input borders */
+  --ring: 221.2 83.2% 53.3%;  /* Focus ring matches primary */
+
+  --radius: 0.5rem;  /* Standard shadcn radius */
+
+  /* Chart colors for data visualization */
+  --chart-1: 221.2 83.2% 53.3%;  /* Indigo */
+  --chart-2: 142.1 76.2% 36.3%;  /* Green */
+  --chart-3: 0 84.2% 60.2%;  /* Red */
+  --chart-4: 47.9 95.8% 53.1%;  /* Yellow */
+  --chart-5: 280.1 89.2% 67.1%;  /* Purple */
+}
+
+.dark {
+  --background: 222.2 84% 4.9%;  /* Very dark */
+  --foreground: 210 40% 98%;  /* Off-white */
+
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+
+  --primary: 217.2 91.2% 59.8%;  /* Brighter indigo for dark mode */
+  --primary-foreground: 222.2 47.4% 11.2%;
+
+  --secondary: 217.2 32.6% 17.5%;  /* Dark gray */
+  --secondary-foreground: 210 40% 98%;
+
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;  /* Light gray for dark backgrounds */
+
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+
+  --success: 142.1 70.6% 45.3%;
+  --success-foreground: 144.9 80.4% 10%;
+
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 224.3 76.3% 48%;
+
+  --chart-1: 220 70% 50%;
+  --chart-2: 160 60% 45%;
+  --chart-3: 30 80% 55%;
+  --chart-4: 280 65% 60%;
+  --chart-5: 340 75% 55%;
 }
 
 @theme inline {
@@ -48,6 +104,13 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+
+  /* Chart colors */
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
 
   /* Accordion animations */
   --animate-accordion-down: accordion-down 0.2s ease-out;

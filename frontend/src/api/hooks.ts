@@ -334,3 +334,97 @@ export function useCancelDeployment() {
     },
   })
 }
+
+// Software Installation query keys
+export const softwareInstallationKeys = {
+  all: ['software-installations'] as const,
+  installation: (id: string) => [...softwareInstallationKeys.all, id] as const,
+  active: (deviceId: string) => [...softwareInstallationKeys.all, 'active', deviceId] as const,
+}
+
+// Software Installation hooks
+export function useSoftwareInstallation(deviceId: string, installationId: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time status and logs
+  useEffect(() => {
+    if (!installationId) return
+
+    const handleInstallationUpdates = (event: string, data: unknown) => {
+      if (event === 'software:status') {
+        const statusUpdate = data as { id: string; status: string; error_details?: string }
+        // Only update if this is our installation
+        if (statusUpdate.id === installationId) {
+          queryClient.setQueryData(softwareInstallationKeys.installation(installationId), (old: any) => ({
+            ...old,
+            status: statusUpdate.status,
+            error_details: statusUpdate.error_details,
+          }))
+        }
+      } else if (event === 'software:log') {
+        const logUpdate = data as { id: string; message: string }
+        // Only update if this is our installation
+        if (logUpdate.id === installationId) {
+          queryClient.setQueryData(softwareInstallationKeys.installation(installationId), (old: any) => ({
+            ...old,
+            install_logs: (old?.install_logs || '') + logUpdate.message,
+          }))
+        }
+      }
+    }
+
+    // Subscribe to software channel
+    const unsubscribe = wsService.on('software', handleInstallationUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [installationId, queryClient])
+
+  return useQuery({
+    queryKey: softwareInstallationKeys.installation(installationId),
+    queryFn: () => apiClient.getSoftwareInstallation(deviceId, installationId),
+    enabled: !!installationId && !!deviceId,
+    // Reduced polling as fallback (WebSocket is primary)
+    refetchInterval: (query) => {
+      const data = query.state.data as import('./types').SoftwareInstallation | undefined
+      // Stop polling when installation is complete or failed
+      if (data?.status === 'success' || data?.status === 'failed') {
+        return false
+      }
+      // Poll every 5 seconds as fallback (WebSocket should be faster)
+      return 5000
+    },
+  })
+}
+
+export function useActiveInstallation(deviceId: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time status and logs
+  useEffect(() => {
+    if (!deviceId) return
+
+    const handleInstallationUpdates = (event: string, _data: unknown) => {
+      // When software status changes, refetch active installation
+      if (event === 'software:status' || event === 'software:log') {
+        queryClient.invalidateQueries({ queryKey: softwareInstallationKeys.active(deviceId) })
+      }
+    }
+
+    // Subscribe to software channel
+    const unsubscribe = wsService.on('software', handleInstallationUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [deviceId, queryClient])
+
+  return useQuery({
+    queryKey: softwareInstallationKeys.active(deviceId),
+    queryFn: () => apiClient.getActiveInstallation(deviceId),
+    enabled: !!deviceId,
+    // Poll every 5 seconds as fallback
+    refetchInterval: 5000,
+  })
+}

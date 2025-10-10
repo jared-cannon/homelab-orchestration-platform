@@ -567,8 +567,9 @@ func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[st
 func (s *DeploymentService) deployToDevice(device *models.Device, projectName, composeContent string) error {
 	host := fmt.Sprintf("%s:22", device.IPAddress)
 
-	// Create directory for this deployment
-	deployDir := fmt.Sprintf("/opt/homelab/%s", projectName)
+	// Use home directory instead of /opt to avoid needing sudo
+	// ~/homelab-deployments is user-writable and Docker can still access it
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", deployDir)
 	if _, err := s.sshClient.ExecuteWithTimeout(host, mkdirCmd, 30*time.Second); err != nil {
 		return fmt.Errorf("failed to create deployment directory: %w", err)
@@ -685,7 +686,7 @@ func (s *DeploymentService) cleanupFailedDeployment(device *models.Device, proje
 	}
 
 	// Try to remove the deployment directory
-	deployDir := fmt.Sprintf("/opt/homelab/%s", projectName)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 	removeCmd := fmt.Sprintf("rm -rf %s 2>/dev/null || true", deployDir)
 	_, err = s.sshClient.ExecuteWithTimeout(host, removeCmd, 30*time.Second)
 	if err != nil {

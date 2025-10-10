@@ -67,13 +67,51 @@ func (h *SoftwareHandler) InstallSoftware(c *fiber.Ctx) error {
 		options["add_user_to_group"] = true
 	}
 
-	// Use plugin-based installation system
-	software, err := h.service.Install(deviceID, req.SoftwareType, options)
+	// Use plugin-based installation system (now async)
+	installation, err := h.service.Install(deviceID, req.SoftwareType, options)
 	if err != nil {
-		return HandleError(c, 500, err, "Failed to install software")
+		return HandleError(c, 500, err, "Failed to start software installation")
 	}
 
-	return c.Status(201).JSON(software)
+	return c.Status(201).JSON(installation)
+}
+
+// GetInstallation handles GET /api/v1/devices/:id/software/installations/:installation_id
+func (h *SoftwareHandler) GetInstallation(c *fiber.Ctx) error {
+	installationID, err := uuid.Parse(c.Params("installation_id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid installation ID",
+		})
+	}
+
+	installation, err := h.service.GetInstallation(installationID)
+	if err != nil {
+		return HandleError(c, 404, err, "Installation not found")
+	}
+
+	return c.JSON(installation)
+}
+
+// GetActiveInstallation handles GET /api/v1/devices/:id/software/installations/active
+func (h *SoftwareHandler) GetActiveInstallation(c *fiber.Ctx) error {
+	deviceID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Invalid device ID",
+		})
+	}
+
+	installation, err := h.service.GetActiveInstallation(deviceID)
+	if err != nil {
+		return HandleError(c, 500, err, "Failed to retrieve active installation")
+	}
+
+	if installation == nil {
+		return c.JSON(fiber.Map{"installation": nil})
+	}
+
+	return c.JSON(installation)
 }
 
 // UninstallSoftware handles DELETE /api/v1/devices/:id/software/:name

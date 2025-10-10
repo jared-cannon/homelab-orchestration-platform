@@ -644,7 +644,85 @@ export const serverSetupGuide: GuideConfig = {
           ],
         },
         {
-          title: 'Step 4: Validate Your Setup (Recommended)',
+          title: 'Step 4: Enable Passwordless Sudo (Required for Platform Features)',
+          content: [
+            {
+              type: 'infoBox',
+              variant: 'info',
+              title: 'Why is this needed?',
+              content: [
+                { type: 'text', text: 'This platform can install Docker, Docker Compose, and other software on your behalf.', className: 'mb-1' },
+                { type: 'text', text: 'Without passwordless sudo, you would need to manually install software on each device.' },
+              ],
+            },
+            {
+              type: 'text',
+              text: 'Configure passwordless sudo:',
+              className: 'text-sm font-medium mb-2',
+            },
+            {
+              type: 'code',
+              code: 'sudo visudo',
+              copyLabel: 'command',
+              className: 'mb-2',
+            },
+            {
+              type: 'text',
+              text: 'Add this line at the bottom of the file (replace "username" with YOUR username):',
+              className: 'text-xs text-muted-foreground mb-2',
+            },
+            {
+              type: 'code',
+              code: 'username ALL=(ALL) NOPASSWD:ALL',
+              copyLabel: 'sudoers entry template',
+              className: 'mb-2',
+            },
+            {
+              type: 'text',
+              text: 'Example: If your username is "john", add: john ALL=(ALL) NOPASSWD:ALL',
+              className: 'text-xs text-muted-foreground italic mb-2',
+            },
+            {
+              type: 'list',
+              ordered: true,
+              items: [
+                'Navigate to the bottom of the file using arrow keys',
+                'Press "i" to enter insert mode',
+                'Type the line (with YOUR username)',
+                'Press ESC to exit insert mode',
+                'Type ":wq" and press Enter to save and quit',
+              ],
+              className: 'text-sm text-muted-foreground space-y-1 ml-4',
+            },
+            {
+              type: 'text',
+              text: 'Test it works:',
+              className: 'text-sm font-medium mb-2 mt-4',
+            },
+            {
+              type: 'code',
+              code: 'sudo whoami',
+              copyLabel: 'command',
+              className: 'mb-2',
+            },
+            {
+              type: 'text',
+              text: 'Should print "root" without asking for a password',
+              className: 'text-xs text-muted-foreground',
+            },
+            {
+              type: 'infoBox',
+              variant: 'warning',
+              title: 'Security Note',
+              content: [
+                { type: 'text', text: 'Passwordless sudo is convenient but reduces security.', className: 'mb-1' },
+                { type: 'text', text: 'Only enable this on trusted local network servers, not public-facing machines.' },
+              ],
+            },
+          ],
+        },
+        {
+          title: 'Step 5: Validate Your Setup (Recommended)',
           content: [
             {
               type: 'text',
@@ -658,6 +736,7 @@ export const serverSetupGuide: GuideConfig = {
                 'From your laptop, SSH into the server (test remote access)',
                 'Run "ip addr show" to confirm network connectivity',
                 'Run "sudo ufw status" to verify firewall is active',
+                'Run "sudo whoami" without password prompt (confirms passwordless sudo)',
                 'If all commands work, your server is ready!',
               ],
               className: 'text-sm text-muted-foreground space-y-1 ml-4',

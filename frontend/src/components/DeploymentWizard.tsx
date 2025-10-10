@@ -15,6 +15,7 @@ import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
 import { CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { LogViewer } from './LogViewer'
 
 interface DeploymentWizardProps {
   recipe: Recipe
@@ -423,6 +424,14 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
                     )}
                     <span>Docker installed</span>
                   </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    {validationResult.resource_check.docker_running ? (
+                      <CheckCircle className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-red-600" />
+                    )}
+                    <span>Docker daemon running</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -562,9 +571,7 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
             {deployment.deployment_logs && (
               <div className="mt-4">
                 <h4 className="text-sm font-medium mb-2">Deployment Logs</h4>
-                <div className="bg-gray-900 text-green-400 rounded p-3 text-xs font-mono max-h-64 overflow-y-auto whitespace-pre-wrap">
-                  {deployment.deployment_logs}
-                </div>
+                <LogViewer logs={deployment.deployment_logs} />
               </div>
             )}
 

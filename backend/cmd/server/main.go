@@ -49,6 +49,7 @@ func initDB() (*gorm.DB, error) {
 		&models.Deployment{},
 		&models.Credential{},
 		&models.InstalledSoftware{},
+		&models.SoftwareInstallation{},
 		&models.NFSExport{},
 		&models.NFSMount{},
 		&models.Volume{},
@@ -84,6 +85,7 @@ func main() {
 
 	sshClient := ssh.NewClient()
 	credMatcher := services.NewCredentialMatcher(db, credService, sshClient)
+	validator := services.NewValidatorService(sshClient)
 	deviceService := services.NewDeviceService(db, credService, sshClient)
 	userService := services.NewUserService(db)
 
@@ -97,8 +99,8 @@ func main() {
 	// Initialize software registry
 	softwareRegistry := services.NewSoftwareRegistry("./software-definitions")
 
-	// Initialize software and infrastructure services
-	softwareService := services.NewSoftwareService(db, sshClient, softwareRegistry)
+	// Initialize software and infrastructure services (pass wsHub for log streaming)
+	softwareService := services.NewSoftwareService(db, sshClient, softwareRegistry, wsHub)
 	nfsService := services.NewNFSService(db, sshClient, softwareService)
 	volumeService := services.NewVolumeService(db, sshClient, softwareService)
 
@@ -110,7 +112,7 @@ func main() {
 		recipes := recipeLoader.ListRecipes()
 		log.Printf("🏪 Marketplace initialized with %d recipes", len(recipes))
 	}
-	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService)
+	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator)
 	deviceScorer := services.NewDeviceScorer(db, sshClient)
 
 	// Initialize deployment service
@@ -206,6 +208,8 @@ func main() {
 	// Software management routes
 	devices.Get("/software", softwareHandler.ListInstalled)
 	devices.Post("/software", softwareHandler.InstallSoftware)
+	devices.Get("/software/installations/active", softwareHandler.GetActiveInstallation)
+	devices.Get("/software/installations/:installation_id", softwareHandler.GetInstallation)
 	devices.Post("/software/detect", softwareHandler.DetectInstalled)
 	devices.Get("/software/updates", softwareHandler.CheckUpdates)
 	devices.Post("/software/:name/update", softwareHandler.UpdateSoftware)

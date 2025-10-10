@@ -40,6 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/dialog'
+import { LogViewer } from '../components/LogViewer'
 
 type FilterStatus = DeploymentStatus | 'all' | 'deploying_composite'
 
@@ -416,10 +417,8 @@ export function DeploymentsPage() {
               Complete deployment logs for this application
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4 max-h-[60vh] overflow-auto">
-            <pre className="text-xs font-mono bg-muted p-4 rounded-lg whitespace-pre-wrap break-words">
-              {selectedLogs.logs || 'No logs available'}
-            </pre>
+          <div className="mt-4">
+            <LogViewer logs={selectedLogs.logs || ''} className="max-h-[60vh]" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLogsDialogOpen(false)}>

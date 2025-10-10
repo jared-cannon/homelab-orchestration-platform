@@ -13,14 +13,16 @@ type MarketplaceService struct {
 	db            *gorm.DB
 	recipeLoader  *RecipeLoader
 	deviceService *DeviceService
+	validator     *ValidatorService
 }
 
 // NewMarketplaceService creates a new marketplace service
-func NewMarketplaceService(db *gorm.DB, recipeLoader *RecipeLoader, deviceService *DeviceService) *MarketplaceService {
+func NewMarketplaceService(db *gorm.DB, recipeLoader *RecipeLoader, deviceService *DeviceService, validator *ValidatorService) *MarketplaceService {
 	return &MarketplaceService{
 		db:            db,
 		recipeLoader:  recipeLoader,
 		deviceService: deviceService,
+		validator:     validator,
 	}
 }
 
@@ -56,6 +58,7 @@ type ResourceCheck struct {
 	AvailableStorageGB int  `json:"available_storage_gb"`
 	StorageSufficient  bool `json:"storage_sufficient"`
 	DockerInstalled    bool `json:"docker_installed"`
+	DockerRunning      bool `json:"docker_running"`
 }
 
 // ValidateDeployment validates that a deployment can proceed
@@ -99,12 +102,31 @@ func (s *MarketplaceService) ValidateDeployment(recipeSlug string, deviceID uuid
 		}
 	}
 
-	// Check resources (simplified for MVP - will enhance later)
-	// TODO: Implement actual resource checking via SSH
+	// Check resources via SSH
+	host := device.IPAddress + ":22"
+
+	// Check Docker installation and status
+	dockerInstalled, _, err := s.validator.DockerInstalled(host)
+	if err != nil {
+		result.Valid = false
+		result.Errors = append(result.Errors, "Docker is not installed on this device")
+	}
+
+	dockerRunning := false
+	if dockerInstalled {
+		dockerRunning, err = s.validator.DockerRunning(host)
+		if err != nil {
+			result.Valid = false
+			result.Errors = append(result.Errors, "Docker daemon is not running on this device")
+		}
+	}
+
+	// TODO: Implement actual RAM and storage checking
 	result.ResourceCheck = &ResourceCheck{
 		RequiredRAMMB:      recipe.Resources.MinRAMMB,
 		RequiredStorageGB:  recipe.Resources.MinStorageGB,
-		DockerInstalled:    true, // Assume Docker is installed (validated during device add)
+		DockerInstalled:    dockerInstalled,
+		DockerRunning:      dockerRunning,
 		RAMSufficient:      true, // TODO: Check actual RAM
 		StorageSufficient:  true, // TODO: Check actual storage
 		AvailableRAMMB:     4096, // Placeholder

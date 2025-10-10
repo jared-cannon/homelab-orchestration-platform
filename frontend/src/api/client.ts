@@ -10,6 +10,7 @@ import type {
   ScanProgress,
   InstalledSoftware,
   InstallSoftwareRequest,
+  SoftwareInstallation,
   NFSExport,
   NFSMount,
   SetupNFSServerRequest,
@@ -180,11 +181,33 @@ class APIClient {
   async installSoftware(
     deviceId: string,
     data: InstallSoftwareRequest
-  ): Promise<InstalledSoftware> {
-    return this.request<InstalledSoftware>(`/devices/${deviceId}/software`, {
+  ): Promise<SoftwareInstallation> {
+    return this.request<SoftwareInstallation>(`/devices/${deviceId}/software`, {
       method: 'POST',
       body: JSON.stringify(data),
     })
+  }
+
+  async getSoftwareInstallation(
+    deviceId: string,
+    installationId: string
+  ): Promise<SoftwareInstallation> {
+    return this.request<SoftwareInstallation>(
+      `/devices/${deviceId}/software/installations/${installationId}`
+    )
+  }
+
+  async getActiveInstallation(
+    deviceId: string
+  ): Promise<SoftwareInstallation | null> {
+    const response = await this.request<SoftwareInstallation | { installation: null }>(
+      `/devices/${deviceId}/software/installations/active`
+    )
+    // Backend returns {installation: null} when there's no active installation
+    if (response && 'installation' in response && response.installation === null) {
+      return null
+    }
+    return response as SoftwareInstallation
   }
 
   async uninstallSoftware(deviceId: string, name: string): Promise<void> {
