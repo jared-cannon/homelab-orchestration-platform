@@ -7,7 +7,7 @@ import type { Device, DeviceType } from './generated-types'
 export type { Device, DeviceType, DeviceStatus, Application, Deployment, DeploymentStatus } from './generated-types'
 
 export interface DeviceCredentials {
-  type: 'auto' | 'password' | 'ssh_key'
+  type: 'auto' | 'password' | 'ssh_key' | 'tailscale'
   username: string
   password?: string
   ssh_key?: string

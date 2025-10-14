@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { BookOpen } from 'lucide-react'
-import { useDevices } from '../api/hooks'
+import { useDevices, useAggregateResources } from '../api/hooks'
 import { AddDeviceDialog } from '../components/AddDeviceDialog'
 import { DeviceDiscoveryWizard } from '../components/DeviceDiscoveryWizard'
 import { FirstRunWizard } from '../components/FirstRunWizard'
 import { DeviceHealthCard } from '../components/DeviceHealthCard'
+import { AggregateResourceCard } from '../components/AggregateResourceCard'
 import { ServerSetupGuide } from '../components/ServerSetupGuide'
 import { Button } from '../components/ui/button'
 
 export function DevicesPage() {
   const { data: devices, isLoading, error } = useDevices()
+  const { data: aggregateResources } = useAggregateResources()
   const [showSetupGuide, setShowSetupGuide] = useState(false)
 
   // Show toast notification when device loading fails
@@ -74,47 +76,52 @@ export function DevicesPage() {
             </div>
           </div>
 
-          {/* Stats Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <span className="text-lg font-bold text-primary">{devices.length}</span>
-                </div>
+          {/* Homelab Overview */}
+          <div className="mt-6 mb-6">
+            <div className="bg-card border border-border rounded-lg p-5 shadow-sm mb-4">
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Devices</p>
-                  <p className="text-xs text-muted-foreground/70">Across your network</p>
+                  <h2 className="text-lg font-semibold">Your Homelab</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {aggregateResources?.online_devices || 0} of {devices.length} devices online
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-primary">
+                    {aggregateResources?.total_cpu_cores || 0}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Total CPU Cores</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                  <span className="text-lg font-bold text-success">
-                    {devices.filter(d => d.status === 'online').length}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Online</p>
-                  <p className="text-xs text-muted-foreground/70">Active connections</p>
-                </div>
+            {/* Aggregate Resource Cards */}
+            {aggregateResources && aggregateResources.total_devices > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <AggregateResourceCard
+                  type="cpu"
+                  used={aggregateResources.avg_cpu_usage_percent}
+                  total={100}
+                  unit="%"
+                  percentage={aggregateResources.avg_cpu_usage_percent}
+                  cores={aggregateResources.total_cpu_cores}
+                />
+                <AggregateResourceCard
+                  type="ram"
+                  used={aggregateResources.used_ram_mb}
+                  total={aggregateResources.total_ram_mb}
+                  unit="MB"
+                  percentage={aggregateResources.ram_usage_percent}
+                />
+                <AggregateResourceCard
+                  type="storage"
+                  used={aggregateResources.used_storage_gb}
+                  total={aggregateResources.total_storage_gb}
+                  unit="GB"
+                  percentage={aggregateResources.storage_usage_percent}
+                />
               </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
-                  <span className="text-lg font-bold text-muted-foreground">
-                    {devices.filter(d => d.status === 'offline').length}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Offline</p>
-                  <p className="text-xs text-muted-foreground/70">Unreachable</p>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 

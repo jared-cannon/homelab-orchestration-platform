@@ -1,66 +1,67 @@
 @import "tailwindcss";
 
 :root {
-  /* Shadcn default variables with indigo brand colors */
+  /* Modern blue/teal color scheme - professional infrastructure theme */
   --background: 0 0% 100%;  /* Pure white */
-  --foreground: 222.2 84% 4.9%;  /* Near black - excellent contrast */
+  --foreground: 222.2 47.4% 11.2%;  /* Near black - excellent contrast */
 
   --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
+  --card-foreground: 222.2 47.4% 11.2%;
 
   --popover: 0 0% 100%;
-  --popover-foreground: 222.2 84% 4.9%;
+  --popover-foreground: 222.2 47.4% 11.2%;
 
-  --primary: 221.2 83.2% 53.3%;  /* Indigo-600 - vibrant, accessible */
-  --primary-foreground: 210 40% 98%;  /* Off-white for better readability */
+  --primary: 217.2 91.2% 59.8%;  /* Blue-600 - professional, trustworthy */
+  --primary-foreground: 0 0% 100%;  /* Pure white for contrast */
 
-  --secondary: 210 40% 96.1%;  /* Light gray */
-  --secondary-foreground: 222.2 47.4% 11.2%;  /* Dark text */
+  --secondary: 178.7 78.1% 46.3%;  /* Teal-500 - fresh accent */
+  --secondary-foreground: 0 0% 100%;  /* Pure white for contrast */
 
-  --muted: 210 40% 96.1%;  /* Light gray background */
-  --muted-foreground: 215.4 16.3% 46.9%;  /* Medium gray - WCAG AA compliant */
+  --muted: 220 14.3% 95.9%;  /* Slate-50 - subtle background */
+  --muted-foreground: 215.4 16.3% 46.9%;  /* Slate-600 - muted text */
 
-  --accent: 210 40% 96.1%;  /* Light accent background */
-  --accent-foreground: 222.2 47.4% 11.2%;  /* Dark accent text */
+  --accent: 220 14.3% 95.9%;  /* Slate-50 */
+  --accent-foreground: 222.2 47.4% 11.2%;  /* Slate-900 */
 
   --destructive: 0 84.2% 60.2%;  /* Red for errors */
-  --destructive-foreground: 210 40% 98%;
+  --destructive-foreground: 0 0% 100%;
 
   --success: 142.1 76.2% 36.3%;  /* Green for success */
   --success-foreground: 0 0% 100%;
 
-  --border: 214.3 31.8% 91.4%;  /* Subtle borders */
-  --input: 214.3 31.8% 91.4%;  /* Input borders */
-  --ring: 221.2 83.2% 53.3%;  /* Focus ring matches primary */
+  --warning: 32.1 94.6% 43.7%;  /* Orange-500 for warnings */
+  --warning-foreground: 0 0% 100%;
+
+  --border: 220 13% 91%;  /* Slate-200 - subtle borders */
+  --input: 220 13% 91%;  /* Slate-200 */
+  --ring: 217.2 91.2% 59.8%;  /* Focus ring matches primary */
 
   --radius: 0.5rem;  /* Standard shadcn radius */
 
-  /* Chart colors for data visualization */
-  --chart-1: 221.2 83.2% 53.3%;  /* Indigo */
-  --chart-2: 142.1 76.2% 36.3%;  /* Green */
-  --chart-3: 0 84.2% 60.2%;  /* Red */
-  --chart-4: 47.9 95.8% 53.1%;  /* Yellow */
-  --chart-5: 280.1 89.2% 67.1%;  /* Purple */
+  /* Resource-specific colors (all shades of primary blue/teal for consistency) */
+  --cpu-color: 217.2 91.2% 59.8%;  /* Blue-600 - primary */
+  --ram-color: 178.7 78.1% 46.3%;  /* Teal-500 - secondary */
+  --storage-color: 198.7 88.7% 48.4%;  /* Cyan-500 - accent */
 }
 
 .dark {
-  --background: 222.2 84% 4.9%;  /* Very dark */
+  --background: 222.2 47.4% 11.2%;  /* Dark slate */
   --foreground: 210 40% 98%;  /* Off-white */
 
-  --card: 222.2 84% 4.9%;
+  --card: 217.2 32.6% 17.5%;  /* Slightly lighter than background */
   --card-foreground: 210 40% 98%;
 
-  --popover: 222.2 84% 4.9%;
+  --popover: 222.2 47.4% 11.2%;
   --popover-foreground: 210 40% 98%;
 
-  --primary: 217.2 91.2% 59.8%;  /* Brighter indigo for dark mode */
-  --primary-foreground: 222.2 47.4% 11.2%;
+  --primary: 217.2 91.2% 59.8%;  /* Blue-600 - same as light mode */
+  --primary-foreground: 0 0% 100%;
 
-  --secondary: 217.2 32.6% 17.5%;  /* Dark gray */
-  --secondary-foreground: 210 40% 98%;
+  --secondary: 178.7 78.1% 46.3%;  /* Teal-500 - same as light mode */
+  --secondary-foreground: 0 0% 100%;
 
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;  /* Light gray for dark backgrounds */
+  --muted: 217.2 32.6% 17.5%;  /* Dark slate */
+  --muted-foreground: 215 20.2% 65.1%;  /* Light gray */
 
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
@@ -69,17 +70,19 @@
   --destructive-foreground: 210 40% 98%;
 
   --success: 142.1 70.6% 45.3%;
-  --success-foreground: 144.9 80.4% 10%;
+  --success-foreground: 0 0% 100%;
+
+  --warning: 32.1 94.6% 43.7%;
+  --warning-foreground: 0 0% 100%;
 
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
-  --ring: 224.3 76.3% 48%;
+  --ring: 217.2 91.2% 59.8%;
 
-  --chart-1: 220 70% 50%;
-  --chart-2: 160 60% 45%;
-  --chart-3: 30 80% 55%;
-  --chart-4: 280 65% 60%;
-  --chart-5: 340 75% 55%;
+  /* Resource colors - same as light mode for consistency */
+  --cpu-color: 217.2 91.2% 59.8%;
+  --ram-color: 178.7 78.1% 46.3%;
+  --storage-color: 198.7 88.7% 48.4%;
 }
 
 @theme inline {
@@ -101,16 +104,16 @@
   --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-success: hsl(var(--success));
   --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
 
-  /* Chart colors */
-  --color-chart-1: hsl(var(--chart-1));
-  --color-chart-2: hsl(var(--chart-2));
-  --color-chart-3: hsl(var(--chart-3));
-  --color-chart-4: hsl(var(--chart-4));
-  --color-chart-5: hsl(var(--chart-5));
+  /* Resource-specific colors for metrics */
+  --color-cpu: hsl(var(--cpu-color));
+  --color-ram: hsl(var(--ram-color));
+  --color-storage: hsl(var(--storage-color));
 
   /* Accordion animations */
   --animate-accordion-down: accordion-down 0.2s ease-out;

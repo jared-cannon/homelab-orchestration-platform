@@ -118,6 +118,8 @@ func (h *HealthCheckService) checkDeviceHealth(deviceID uuid.UUID) {
 			client, err = h.sshClient.ConnectWithKey(host, creds.Username, creds.SSHKey, creds.SSHKeyPasswd)
 		} else if creds.Type == "auto" {
 			client, err = h.sshClient.TryAutoAuth(host, creds.Username)
+		} else if creds.Type == "tailscale" {
+			client, err = h.sshClient.ConnectWithTailscale(host, creds.Username)
 		} else {
 			log.Printf("[HealthCheck] Unknown credential type for %s: %s", device.Name, creds.Type)
 			h.updateDeviceStatus(deviceID, models.DeviceStatusError)

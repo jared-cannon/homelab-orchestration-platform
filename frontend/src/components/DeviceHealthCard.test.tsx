@@ -10,6 +10,8 @@ const baseDevice: Device = {
   type: 'server',
   ip_address: '192.168.1.100',
   status: DeviceStatusOnline,
+  username: 'admin',
+  auth_type: 'auto',
   created_at: '2025-10-07T12:00:00Z',
   updated_at: '2025-10-07T12:00:00Z',
 }

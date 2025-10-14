@@ -30,9 +30,17 @@ func NewDeviceService(db *gorm.DB, credService *CredentialService, sshClient *ss
 
 // CreateDevice creates a new device and stores its credentials
 func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredentials) error {
-	// Validate IP address
-	if !ValidateIPAddress(device.IPAddress) {
-		return fmt.Errorf("invalid IP address: %s", device.IPAddress)
+	// Validate IP address or hostname
+	// For Tailscale, allow hostnames (e.g., "machine.tail-scale.ts.net")
+	// For other auth types, require IP addresses for consistency
+	if creds.Type == "tailscale" {
+		if !ValidateHostname(device.IPAddress) {
+			return fmt.Errorf("invalid hostname or IP address: %s", device.IPAddress)
+		}
+	} else {
+		if !ValidateIPAddress(device.IPAddress) {
+			return fmt.Errorf("invalid IP address: %s", device.IPAddress)
+		}
 	}
 
 	// Check if device with this IP already exists
@@ -51,12 +59,13 @@ func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredent
 	device.AuthType = models.AuthType(creds.Type)
 
 	// Store secrets in keychain (only for password/ssh_key types)
-	// For "auto" type, this is a no-op since no secrets to store
+	// For "auto" and "tailscale" types, this is a no-op since no secrets to store
 	if err := s.credService.StoreCredentials(device.ID.String(), creds, device.Name, device.IPAddress); err != nil {
 		return fmt.Errorf("failed to store credentials: %w", err)
 	}
 
 	// Set credential key reference (only used for password/ssh_key types)
+	// "auto" and "tailscale" types don't use keychain, so no credential key needed
 	if creds.Type == "password" || creds.Type == "ssh_key" {
 		device.CredentialKey = device.ID.String()
 	}
@@ -128,9 +137,17 @@ func (s *DeviceService) DeleteDevice(id uuid.UUID) error {
 func (s *DeviceService) TestConnectionWithCredentials(ipAddress string, creds *DeviceCredentials) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
-	// Validate IP address
-	if !ValidateIPAddress(ipAddress) {
-		return result, fmt.Errorf("invalid IP address: %s", ipAddress)
+	// Validate IP address or hostname
+	// For Tailscale, allow hostnames (e.g., "machine.tail-scale.ts.net")
+	// For other auth types, require IP addresses for consistency
+	if creds.Type == "tailscale" {
+		if !ValidateHostname(ipAddress) {
+			return result, fmt.Errorf("invalid hostname or IP address: %s", ipAddress)
+		}
+	} else {
+		if !ValidateIPAddress(ipAddress) {
+			return result, fmt.Errorf("invalid IP address: %s", ipAddress)
+		}
 	}
 
 	// Establish SSH connection
@@ -143,6 +160,8 @@ func (s *DeviceService) TestConnectionWithCredentials(ipAddress string, creds *D
 		_, err = s.sshClient.ConnectWithKey(host, creds.Username, creds.SSHKey, creds.SSHKeyPasswd)
 	} else if creds.Type == "auto" {
 		_, err = s.sshClient.TryAutoAuth(host, creds.Username)
+	} else if creds.Type == "tailscale" {
+		_, err = s.sshClient.ConnectWithTailscale(host, creds.Username)
 	} else {
 		return result, fmt.Errorf("unknown credential type: %s", creds.Type)
 	}
@@ -255,10 +274,17 @@ func (s *DeviceService) GetDeviceCredentials(id uuid.UUID) (*DeviceCredentials, 
 		return creds, nil
 	}
 
-	// For "auto" type, construct credentials from device table
+	// For "auto" and "tailscale" types, construct credentials from device table
+	// These types don't require keychain storage
 	if device.AuthType == models.AuthTypeAuto {
 		return &DeviceCredentials{
 			Type:     "auto",
+			Username: device.Username,
+		}, nil
+	}
+	if device.AuthType == models.AuthTypeTailscale {
+		return &DeviceCredentials{
+			Type:     "tailscale",
 			Username: device.Username,
 		}, nil
 	}
@@ -293,7 +319,7 @@ func (s *DeviceService) UpdateDeviceCredentials(id uuid.UUID, creds *DeviceCrede
 	if creds.Type == "password" || creds.Type == "ssh_key" {
 		updates["credential_key"] = id.String()
 	} else {
-		updates["credential_key"] = "" // Clear for "auto" type
+		updates["credential_key"] = "" // Clear for "auto" and "tailscale" types
 	}
 
 	if err := s.db.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {

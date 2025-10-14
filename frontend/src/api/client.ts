@@ -430,6 +430,65 @@ class APIClient {
       method: 'DELETE',
     })
   }
+
+  // Resource Monitoring API
+  async getAggregateResources(): Promise<{
+    total_devices: number
+    online_devices: number
+    offline_devices: number
+    total_cpu_cores: number
+    avg_cpu_usage_percent: number
+    total_ram_mb: number
+    used_ram_mb: number
+    available_ram_mb: number
+    ram_usage_percent: number
+    total_storage_gb: number
+    used_storage_gb: number
+    available_storage_gb: number
+    storage_usage_percent: number
+  }> {
+    return this.request('/resources/aggregate')
+  }
+
+  async getDeviceResources(deviceId: string): Promise<{
+    device_id: string
+    cpu_usage_percent: number
+    cpu_cores: number
+    total_ram_mb: number
+    used_ram_mb: number
+    available_ram_mb: number
+    ram_usage_percent: number
+    total_storage_gb: number
+    used_storage_gb: number
+    available_storage_gb: number
+    storage_usage_percent: number
+    recorded_at: string
+  }> {
+    return this.request(`/devices/${deviceId}/resources`)
+  }
+
+  async getDeviceResourcesHistory(
+    deviceId: string,
+    hours: number = 24
+  ): Promise<Array<{
+    cpu_usage_percent: number
+    cpu_cores: number
+    total_ram_mb: number
+    used_ram_mb: number
+    available_ram_mb: number
+    ram_usage_percent: number
+    total_storage_gb: number
+    used_storage_gb: number
+    available_storage_gb: number
+    storage_usage_percent: number
+    recorded_at: string
+  }>> {
+    return this.request(`/devices/${deviceId}/resources/history?hours=${hours}`)
+  }
+
+  async getResourceMonitoringStatus(): Promise<{ running: boolean }> {
+    return this.request('/resources/status')
+  }
 }
 
 export const apiClient = new APIClient()

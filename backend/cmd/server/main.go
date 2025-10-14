@@ -45,6 +45,7 @@ func initDB() (*gorm.DB, error) {
 	err = db.AutoMigrate(
 		&models.User{},
 		&models.Device{},
+		&models.DeviceMetrics{},
 		&models.Application{},
 		&models.Deployment{},
 		&models.Credential{},
@@ -122,12 +123,31 @@ func main() {
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
 	healthCheckService.SetDeviceService(deviceService)
+
+	// Initialize resource monitoring service
+	resourceMonitoring := services.NewResourceMonitoringService(db, sshClient, deviceService, credService, &services.ResourceMonitoringConfig{
+		PollInterval:    30 * time.Second,
+		RetentionPeriod: 24 * time.Hour,
+	})
+
 	log.Printf("🔧 Services initialized")
 
 	// Start health check service
 	healthCtx := context.Background()
 	healthCheckService.Start(healthCtx)
 	log.Printf("🏥 Health check service started")
+
+	// Configure resource monitoring WebSocket broadcast
+	resourceMonitoring.SetBroadcastFunc(func(channel, event string, data interface{}) {
+		wsHub.Broadcast(channel, event, data)
+	})
+
+	// Start resource monitoring service
+	if err := resourceMonitoring.Start(); err != nil {
+		log.Printf("⚠️  Warning: Failed to start resource monitoring service: %v", err)
+	} else {
+		log.Printf("📊 Resource monitoring service started (polling every 30s)")
+	}
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -190,6 +210,10 @@ func main() {
 	scannerHandler := api.NewScannerHandler(scannerService)
 	scannerHandler.RegisterRoutes(protectedGroup)
 
+	// Register resource monitoring routes
+	resourceHandler := api.NewResourceHandler(resourceMonitoring)
+	resourceHandler.RegisterRoutes(protectedGroup)
+
 	// Register software, NFS, volume, marketplace, and deployment handlers
 	softwareHandler := api.NewSoftwareHandler(softwareService)
 	nfsHandler := api.NewNFSHandler(nfsService)
@@ -236,6 +260,9 @@ func main() {
 	devices.Get("/volumes/:name", volumeHandler.GetVolume)
 	devices.Get("/volumes/:name/inspect", volumeHandler.InspectVolume)
 	devices.Delete("/volumes/:name", volumeHandler.RemoveVolume)
+
+	// Resource monitoring routes (device-specific)
+	resourceHandler.RegisterDeviceResourceRoutes(protectedGroup.Group("/devices"))
 
 	// Register WebSocket routes (websocket auth is handled separately)
 	wsHandler := api.NewWebSocketHandler(wsHub)
@@ -285,6 +312,11 @@ func main() {
 	// Shutdown services in order
 	log.Printf("🏥 Shutting down health check service...")
 	healthCheckService.Stop()
+
+	log.Printf("📊 Shutting down resource monitoring service...")
+	if err := resourceMonitoring.Stop(); err != nil {
+		log.Printf("Error stopping resource monitoring service: %v", err)
+	}
 
 	log.Printf("📡 Shutting down WebSocket hub...")
 	wsHub.Shutdown()

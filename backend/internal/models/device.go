@@ -31,9 +31,10 @@ const (
 type AuthType string
 
 const (
-	AuthTypeAuto     AuthType = "auto"     // SSH agent or default keys
-	AuthTypePassword AuthType = "password" // Password authentication
-	AuthTypeSSHKey   AuthType = "ssh_key"  // SSH key authentication
+	AuthTypeAuto      AuthType = "auto"      // SSH agent or default keys
+	AuthTypePassword  AuthType = "password"  // Password authentication
+	AuthTypeSSHKey    AuthType = "ssh_key"   // SSH key authentication
+	AuthTypeTailscale AuthType = "tailscale" // Tailscale SSH (uses Tailscale's built-in SSH)
 )
 
 // Device represents a managed device (server, router, NAS, etc.)
@@ -48,6 +49,18 @@ type Device struct {
 	AuthType      AuthType     `gorm:"default:auto" json:"auth_type"`           // Authentication method
 	CredentialKey string       `json:"-"`                                       // Reference to credential in keychain (only for password/ssh_key), never expose in JSON
 	Metadata      []byte       `gorm:"type:json" json:"metadata,omitempty"`
+
+	// Current resource metrics (updated by ResourceMonitoringService)
+	CPUUsagePercent    *float64   `json:"cpu_usage_percent,omitempty"`
+	CPUCores           *int       `json:"cpu_cores,omitempty"`
+	TotalRAMMB         *int       `json:"total_ram_mb,omitempty"`
+	UsedRAMMB          *int       `json:"used_ram_mb,omitempty"`
+	AvailableRAMMB     *int       `json:"available_ram_mb,omitempty"`
+	TotalStorageGB     *int       `json:"total_storage_gb,omitempty"`
+	UsedStorageGB      *int       `json:"used_storage_gb,omitempty"`
+	AvailableStorageGB *int       `json:"available_storage_gb,omitempty"`
+	ResourcesUpdatedAt *time.Time `json:"resources_updated_at,omitempty"`
+
 	LastSeen      *time.Time   `json:"last_seen,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	UpdatedAt     time.Time    `json:"updated_at"`

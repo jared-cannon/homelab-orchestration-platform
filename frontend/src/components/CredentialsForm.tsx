@@ -28,7 +28,7 @@ export function CredentialsForm({
         {showLabels && <Label htmlFor={`${idPrefix}-auth-type`}>Login Method</Label>}
         <Select
           value={credentials.type}
-          onValueChange={(value: 'auto' | 'password' | 'ssh_key') =>
+          onValueChange={(value: 'auto' | 'password' | 'ssh_key' | 'tailscale') =>
             onChange({
               ...credentials,
               type: value,
@@ -42,11 +42,17 @@ export function CredentialsForm({
             <SelectItem value="auto">Use My SSH Key (Recommended)</SelectItem>
             <SelectItem value="password">Password</SelectItem>
             <SelectItem value="ssh_key">Security Key</SelectItem>
+            <SelectItem value="tailscale">Tailscale SSH</SelectItem>
           </SelectContent>
         </Select>
         {credentials.type === 'auto' && (
           <p className="text-xs text-muted-foreground mt-1">
             Will use your default SSH key or SSH agent - no credentials stored
+          </p>
+        )}
+        {credentials.type === 'tailscale' && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Uses Tailscale's built-in SSH - requires device to be on your Tailnet
           </p>
         )}
       </div>

@@ -193,3 +193,27 @@ func ValidateMACAddress(mac string) bool {
 	macRegex := regexp.MustCompile(`^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$`)
 	return macRegex.MatchString(mac)
 }
+
+// ValidateHostname checks if a hostname is valid (DNS name or IP address)
+// Allows:
+// - IPv4 addresses (192.168.1.1)
+// - IPv6 addresses
+// - Hostnames (my-server, server.local)
+// - FQDNs (my-server.example.com, machine.wolf-bear.ts.net)
+func ValidateHostname(hostname string) bool {
+	if hostname == "" {
+		return false
+	}
+
+	// First check if it's a valid IP address
+	if ValidateIPAddress(hostname) {
+		return true
+	}
+
+	// Validate as hostname/FQDN
+	// Allow: alphanumeric, hyphens, dots, and underscores
+	// Must not start/end with hyphen or dot
+	// Each label must be 1-63 chars, total max 253 chars
+	hostnameRegex := regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-_]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-_]{0,61}[a-zA-Z0-9])?)*$`)
+	return len(hostname) <= 253 && hostnameRegex.MatchString(hostname)
+}

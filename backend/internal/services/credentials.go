@@ -17,12 +17,13 @@ import (
 
 // DeviceCredentials represents credentials for accessing a device
 type DeviceCredentials struct {
-	Type         string `json:"type"` // "password", "ssh_key", or "auto" (agent/default keys)
+	Type         string `json:"type"` // "password", "ssh_key", "auto" (agent/default keys), or "tailscale" (Tailscale SSH)
 	Username     string `json:"username"`
 	Password     string `json:"password,omitempty"`      // For password auth
 	SSHKey       string `json:"ssh_key,omitempty"`       // For SSH key auth
 	SSHKeyPasswd string `json:"ssh_key_passwd,omitempty"` // SSH key passphrase if needed
 	// For "auto" type, only Username is required - tries SSH agent first, then default SSH keys
+	// For "tailscale" type, only Username is required - uses Tailscale's built-in SSH with ACL permissions
 }
 
 // CredentialService manages secure storage of device credentials using OS keychain
@@ -91,11 +92,12 @@ func (s *CredentialService) ensureRing() error {
 
 // StoreCredentials stores device credentials securely in the OS keychain
 // deviceName and deviceIP are optional - used for a more descriptive keychain label
-// For "auto" type credentials (SSH agent), this is a no-op since username is stored in DB
+// For "auto" and "tailscale" type credentials, this is a no-op since username is stored in DB
 func (s *CredentialService) StoreCredentials(deviceID string, creds *DeviceCredentials, deviceName, deviceIP string) error {
-	// For "auto" type credentials (SSH agent), we don't need to store anything in the keychain
-	// The username is stored in the Device table, and SSH will use the agent or default keys
-	if creds.Type == "auto" {
+	// For "auto" type credentials (SSH agent) and "tailscale" type credentials,
+	// we don't need to store anything in the keychain
+	// The username is stored in the Device table, and SSH will use the agent or Tailscale auth
+	if creds.Type == "auto" || creds.Type == "tailscale" {
 		return nil // Nothing to store
 	}
 

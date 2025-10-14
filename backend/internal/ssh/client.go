@@ -375,6 +375,23 @@ func (c *Client) TryAutoAuth(host string, username string) (*ssh.Client, error) 
 	return nil, fmt.Errorf("auto authentication failed - no SSH agent or default keys worked: %w", err)
 }
 
+// ConnectWithTailscale connects using Tailscale SSH
+// Tailscale SSH uses the SSH agent and Tailscale's ACL permissions
+// The host can be a .ts.net hostname or a Tailscale IP (100.x.y.z)
+func (c *Client) ConnectWithTailscale(host string, username string) (*ssh.Client, error) {
+	// Tailscale SSH works through the SSH agent
+	// It automatically handles authentication via Tailscale's identity and ACLs
+	log.Printf("[SSH] Attempting Tailscale SSH connection to %s", host)
+
+	client, err := c.TryAutoAuth(host, username)
+	if err == nil {
+		log.Printf("[SSH] Successfully connected to %s via Tailscale SSH", host)
+		return client, nil
+	}
+
+	return nil, fmt.Errorf("tailscale SSH connection failed: %w", err)
+}
+
 // GetConnection retrieves an existing connection or creates a new one
 func (c *Client) GetConnection(host string) (*ssh.Client, error) {
 	if conn, ok := c.connections.Load(host); ok {

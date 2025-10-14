@@ -16,6 +16,7 @@ import {
 import { EditDeviceDialog } from './EditDeviceDialog'
 import { UpdateCredentialsDialog } from './UpdateCredentialsDialog'
 import { DeleteDeviceDialog } from './DeleteDeviceDialog'
+import { DeviceResourceMetrics } from './DeviceResourceMetrics'
 import { useTestConnection } from '../api/hooks'
 
 interface DeviceHealthCardProps {
@@ -203,6 +204,21 @@ export function DeviceHealthCard({ device }: DeviceHealthCardProps) {
             </div>
           </div>
         </div>
+
+        {/* Resource Metrics */}
+        {device.status === DeviceStatusOnline && (
+          <div className="px-6 pt-4 pb-4 mt-4 border-t border-border/50">
+            <DeviceResourceMetrics
+              cpuUsagePercent={device.cpu_usage_percent}
+              cpuCores={device.cpu_cores}
+              totalRamMB={device.total_ram_mb}
+              usedRamMB={device.used_ram_mb}
+              totalStorageGB={device.total_storage_gb}
+              usedStorageGB={device.used_storage_gb}
+              resourcesUpdatedAt={device.resources_updated_at}
+            />
+          </div>
+        )}
       </Card>
 
       {/* Dialogs */}

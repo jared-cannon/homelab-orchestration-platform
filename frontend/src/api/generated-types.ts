@@ -7,6 +7,46 @@
  */
 
 //////////
+// source: apierror.go
+
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeSudoNotConfigured = "SUDO_NOT_CONFIGURED";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeSSHConnectionFailed = "SSH_CONNECTION_FAILED";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeAuthFailed = "AUTH_FAILED";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeNotFound = "NOT_FOUND";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeAlreadyExists = "ALREADY_EXISTS";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeValidationFailed = "VALIDATION_FAILED";
+/**
+ * Error codes for structured error handling
+ */
+export const ErrCodeInternalError = "INTERNAL_ERROR";
+/**
+ * APIError represents a structured error with code and optional details
+ */
+export interface APIError {
+  code: string;
+  message: string;
+  details?: { [key: string]: any};
+}
+
+//////////
 // source: application.go
 
 /**
@@ -24,6 +64,41 @@ export interface Application {
   required_storage: number /* int64 */; // bytes
   config_template: string;
   setup_steps?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+//////////
+// source: credential.go
+
+/**
+ * CredentialType represents the type of authentication
+ */
+export type CredentialType = string;
+export const CredentialTypePassword: CredentialType = "password";
+export const CredentialTypeSSHKey: CredentialType = "ssh_key";
+/**
+ * Credential represents stored authentication credentials for devices
+ * tygo:emit
+ */
+export interface Credential {
+  id: string;
+  name: string; // User-friendly name like "Home Network Default"
+  type: CredentialType;
+  username: string;
+  password?: string; // Encrypted
+  ssh_key?: string; // Encrypted private key
+  /**
+   * Matching criteria - used to auto-apply credentials
+   */
+  network_cidr?: string; // e.g., "192.168.1.0/24"
+  device_type?: string; // e.g., "server", "nas"
+  host_pattern?: string; // e.g., "*synology*", "*nas*"
+  /**
+   * Usage tracking
+   */
+  last_used?: string;
+  use_count: number /* int */;
   created_at: string;
   updated_at: string;
 }
@@ -50,9 +125,9 @@ export const DeploymentStatusRolledBack: DeploymentStatus = "rolled_back";
  */
 export interface Deployment {
   id: string;
-  recipe_slug: string;
-  recipe_name: string;
-  application_id: string;
+  recipe_slug: string; // Marketplace recipe identifier
+  recipe_name: string; // Cached for display
+  application_id?: string; // Legacy - made nullable
   application?: Application;
   device_id: string;
   device?: Device;
@@ -62,7 +137,7 @@ export interface Deployment {
   internal_port: number /* int */;
   external_port?: number /* int */;
   container_id?: string;
-  compose_project?: string;
+  compose_project?: string; // Docker Compose project name
   generated_compose?: string; // For debugging/transparency
   deployment_logs?: string; // Logs from deployment process
   ssh_commands?: string; // For debugging
@@ -93,6 +168,14 @@ export const DeviceStatusOffline: DeviceStatus = "offline";
 export const DeviceStatusError: DeviceStatus = "error";
 export const DeviceStatusUnknown: DeviceStatus = "unknown";
 /**
+ * AuthType represents the authentication method for SSH
+ */
+export type AuthType = string;
+export const AuthTypeAuto: AuthType = "auto"; // SSH agent or default keys
+export const AuthTypePassword: AuthType = "password"; // Password authentication
+export const AuthTypeSSHKey: AuthType = "ssh_key"; // SSH key authentication
+export const AuthTypeTailscale: AuthType = "tailscale"; // Tailscale SSH (uses Tailscale's built-in SSH)
+/**
  * Device represents a managed device (server, router, NAS, etc.)
  */
 export interface Device {
@@ -102,8 +185,303 @@ export interface Device {
   ip_address: string;
   mac_address?: string;
   status: DeviceStatus;
+  username: string; // SSH username (not sensitive)
+  auth_type: AuthType; // Authentication method
   metadata?: string;
+  /**
+   * Current resource metrics (updated by ResourceMonitoringService)
+   */
+  cpu_usage_percent?: number /* float64 */;
+  cpu_cores?: number /* int */;
+  total_ram_mb?: number /* int */;
+  used_ram_mb?: number /* int */;
+  available_ram_mb?: number /* int */;
+  total_storage_gb?: number /* int */;
+  used_storage_gb?: number /* int */;
+  available_storage_gb?: number /* int */;
+  resources_updated_at?: string;
   last_seen?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+//////////
+// source: device_metrics.go
+
+/**
+ * DeviceMetrics represents resource usage metrics for a device at a point in time
+ */
+export interface DeviceMetrics {
+  id: string;
+  device_id: string;
+  device?: Device;
+  cpu_usage_percent: number /* float64 */;
+  cpu_cores: number /* int */;
+  total_ram_mb: number /* int */;
+  used_ram_mb: number /* int */;
+  available_ram_mb: number /* int */;
+  total_storage_gb: number /* int */;
+  used_storage_gb: number /* int */;
+  available_storage_gb: number /* int */;
+  recorded_at: string;
+  created_at: string;
+}
+
+//////////
+// source: nfs.go
+
+/**
+ * NFSExport represents an NFS export configured on a server device
+ */
+export interface NFSExport {
+  id: string;
+  device_id: string; // The NFS server
+  path: string; // e.g., "/srv/nfs/shared"
+  client_cidr: string; // e.g., "*", "192.168.1.0/24"
+  options: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+/**
+ * NFSMount represents an NFS mount on a client device
+ */
+export interface NFSMount {
+  id: string;
+  device_id: string; // The NFS client
+  server_ip: string; // NFS server IP
+  remote_path: string; // e.g., "/srv/nfs/shared"
+  local_path: string; // e.g., "/mnt/nfs/shared"
+  options: string;
+  permanent: boolean; // Add to /etc/fstab
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+//////////
+// source: recipe.go
+
+/**
+ * Recipe represents a marketplace application recipe loaded from YAML
+ */
+export interface Recipe {
+  id: string;
+  name: string;
+  slug: string;
+  category: string;
+  tagline: string;
+  description: string;
+  icon_url: string;
+  resources: RecipeResources;
+  compose_template: string;
+  config_options: RecipeConfigOption[];
+  post_deploy_instructions: string;
+  health_check: RecipeHealthCheck;
+}
+/**
+ * RecipeMetadata contains metadata about the recipe source and versioning
+ */
+export interface RecipeMetadata {
+  source: string; // "local", "coolify", "portainer", etc.
+  version: string; // Recipe version
+  last_updated: string; // When recipe was last updated
+  updated_at: string; // When we last fetched it
+  source_url: string; // URL to source repository
+  image_version: string; // Latest Docker image version
+  quality_score: number /* int */; // 0-100 quality score
+  verified: boolean; // Is this a verified/official recipe
+  deploy_count: number /* int */; // How many times deployed (local tracking)
+  success_rate: number /* float64 */; // Deployment success rate (0-1)
+}
+/**
+ * RecipeResources defines the resource requirements for a recipe
+ */
+export interface RecipeResources {
+  min_ram_mb: number /* int */;
+  min_storage_gb: number /* int */;
+  recommended_ram_mb: number /* int */;
+  recommended_storage_gb: number /* int */;
+  cpu_cores: number /* int */;
+}
+/**
+ * RecipeConfigOption defines a user-configurable option
+ */
+export interface RecipeConfigOption {
+  name: string;
+  label: string;
+  type: string; // string, number, boolean
+  default: any;
+  required: boolean;
+  description: string;
+}
+/**
+ * RecipeHealthCheck defines health check parameters
+ */
+export interface RecipeHealthCheck {
+  path: string;
+  port: number /* int */; // Port to check (defaults to 80 if not specified)
+  expected_status: number /* int */;
+  timeout_seconds: number /* int */;
+}
+
+//////////
+// source: software.go
+
+/**
+ * SoftwareType represents the type of software
+ */
+export type SoftwareType = string;
+export const SoftwareDocker: SoftwareType = "docker";
+export const SoftwareDockerCompose: SoftwareType = "docker-compose";
+export const SoftwareNFSServer: SoftwareType = "nfs-server";
+export const SoftwareNFSClient: SoftwareType = "nfs-client";
+/**
+ * InstalledSoftware tracks software installed on devices
+ */
+export interface InstalledSoftware {
+  id: string;
+  device_id: string;
+  name: SoftwareType;
+  version: string;
+  installed_at: string;
+  installed_by: string; // username or "system"
+  created_at: string;
+  updated_at: string;
+}
+
+//////////
+// source: software_definition.go
+
+/**
+ * SoftwareDefinition defines how to manage a specific piece of software
+ */
+export interface SoftwareDefinition {
+  id: string; // Unique identifier (e.g., "docker")
+  name: string; // Display name (e.g., "Docker Engine")
+  description: string; // Short description
+  category: string; // Category (e.g., "container", "storage", "database")
+  icon: string; // Icon name or URL
+  commands: SoftwareCommands; // Commands for managing the software
+  options: { [key: string]: string}; // Additional options/metadata
+}
+/**
+ * SoftwareCommands defines the shell commands for managing software
+ */
+export interface SoftwareCommands {
+  /**
+   * CheckInstalled returns exit code 0 if installed, non-zero otherwise
+   * Should output version info to stdout
+   */
+  check_installed: string;
+  /**
+   * CheckVersion returns the currently installed version
+   */
+  check_version: string;
+  /**
+   * CheckUpdates checks if updates are available
+   * Should output "updates available" or similar to stdout if updates exist
+   */
+  check_updates: string;
+  /**
+   * Install installs the software
+   */
+  install: string;
+  /**
+   * Update updates the software to the latest version
+   */
+  update: string;
+  /**
+   * Uninstall removes the software (optional, can be empty)
+   */
+  uninstall: string;
+  /**
+   * PostInstall runs after successful installation (optional)
+   */
+  post_install: string;
+  /**
+   * PreUninstall runs before uninstallation (optional)
+   */
+  pre_uninstall: string;
+}
+/**
+ * SoftwareUpdateInfo represents update availability information
+ */
+export interface SoftwareUpdateInfo {
+  software_id: string;
+  current_version: string;
+  available_version?: string;
+  update_available: boolean;
+  message?: string;
+}
+
+//////////
+// source: software_installation.go
+
+/**
+ * SoftwareInstallationStatus represents the status of a software installation
+ */
+export type SoftwareInstallationStatus = string;
+export const InstallationStatusPending: SoftwareInstallationStatus = "pending";
+export const InstallationStatusInstalling: SoftwareInstallationStatus = "installing";
+export const InstallationStatusSuccess: SoftwareInstallationStatus = "success";
+export const InstallationStatusFailed: SoftwareInstallationStatus = "failed";
+/**
+ * SoftwareInstallation represents a software installation job
+ */
+export interface SoftwareInstallation {
+  id: string;
+  device_id: string;
+  software_name: SoftwareType;
+  status: SoftwareInstallationStatus;
+  install_logs?: string;
+  error_details?: string;
+  created_at: string;
+  completed_at?: string;
+  /**
+   * Relationships
+   */
+  device?: Device;
+}
+
+//////////
+// source: user.go
+
+/**
+ * User represents a user account in the system
+ */
+export interface User {
+  id: string;
+  username: string;
+  email: string; // Optional
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+//////////
+// source: volume.go
+
+/**
+ * VolumeType represents the type of Docker volume
+ */
+export type VolumeType = string;
+export const VolumeTypeLocal: VolumeType = "local";
+export const VolumeTypeNFS: VolumeType = "nfs";
+/**
+ * Volume represents a Docker volume
+ */
+export interface Volume {
+  id: string;
+  device_id: string;
+  name: string;
+  type: VolumeType;
+  driver: string;
+  driver_opts?: string; // JSON map of driver options
+  nfs_server_ip?: string;
+  nfs_path?: string;
+  size: number /* int64 */; // bytes, if known
+  in_use: boolean;
   created_at: string;
   updated_at: string;
 }

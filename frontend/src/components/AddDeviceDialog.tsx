@@ -30,7 +30,7 @@ export function AddDeviceDialog() {
     ip_address: '',
     mac_address: '',
     credentials: {
-      type: 'auto' as 'auto' | 'password' | 'ssh_key',
+      type: 'auto' as 'auto' | 'password' | 'ssh_key' | 'tailscale',
       username: '',
       password: '',
       ssh_key: '',
@@ -212,16 +212,23 @@ export function AddDeviceDialog() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="ip">IP Address</Label>
+              <Label htmlFor="ip">
+                {formData.credentials.type === 'tailscale' ? 'IP Address or Hostname' : 'IP Address'}
+              </Label>
               <Input
                 id="ip"
                 value={formData.ip_address}
                 onChange={(e) =>
                   setFormData({ ...formData, ip_address: e.target.value })
                 }
-                placeholder="192.168.1.100"
+                placeholder={formData.credentials.type === 'tailscale' ? '100.64.1.5 or machine.wolf-bear.ts.net' : '192.168.1.100'}
                 required
               />
+              {formData.credentials.type === 'tailscale' && (
+                <p className="text-xs text-muted-foreground">
+                  You can use either a Tailscale IP (100.x.x.x) or hostname
+                </p>
+              )}
             </div>
 
             <div className="grid gap-2">
@@ -244,7 +251,7 @@ export function AddDeviceDialog() {
                   <Label htmlFor="auth-type">Login Method</Label>
                   <Select
                     value={formData.credentials.type}
-                    onValueChange={(value: 'auto' | 'password' | 'ssh_key') =>
+                    onValueChange={(value: 'auto' | 'password' | 'ssh_key' | 'tailscale') =>
                       setFormData({
                         ...formData,
                         credentials: { ...formData.credentials, type: value },
@@ -258,11 +265,17 @@ export function AddDeviceDialog() {
                       <SelectItem value="auto">Use My SSH Key (Recommended)</SelectItem>
                       <SelectItem value="password">Password</SelectItem>
                       <SelectItem value="ssh_key">Security Key</SelectItem>
+                      <SelectItem value="tailscale">Tailscale SSH</SelectItem>
                     </SelectContent>
                   </Select>
                   {formData.credentials.type === 'auto' && (
                     <p className="text-xs text-muted-foreground mt-1">
                       Will use your default SSH key or SSH agent - no credentials stored
+                    </p>
+                  )}
+                  {formData.credentials.type === 'tailscale' && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Uses Tailscale's built-in SSH - requires device to be on your Tailnet
                     </p>
                   )}
                 </div>

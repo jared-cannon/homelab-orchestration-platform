@@ -41,9 +41,10 @@ Multi-device homelab orchestration with intelligent resource management and auto
 - ✅ Device discovery and management
 - ✅ Recipe-based marketplace (20+ apps)
 - ✅ Single-device deployment
-- 🚧 Intelligent resource scoring
+- ✅ Real-time resource monitoring (CPU, RAM, Storage)
+- ✅ Cross-device resource aggregation
+- ✅ Intelligent resource scoring
 - 🚧 Shared database infrastructure
-- 🚧 Cross-device resource aggregation
 
 Documentation: [docs/architecture.md](docs/architecture.md), [docs/vision-and-roadmap.md](docs/vision-and-roadmap.md)
 
@@ -94,6 +95,7 @@ homelab-orchestration-platform/
 │   └── src/          # Frontend source code
 ├── docs/             # Documentation
 │   ├── architecture.md
+│   ├── database-schema.md
 │   ├── vision-and-roadmap.md
 │   ├── app-system.md
 │   ├── intelligent-orchestration.md
@@ -118,9 +120,20 @@ make install-deps      # Install all dependencies
 
 ## Current Status
 
-Development environment functional. Core features in active development: device scanning, app marketplace, backup management.
+**Production-Ready Features:**
+- ✅ Device discovery and SSH management (auto, password, SSH key, Tailscale)
+- ✅ Real-time resource monitoring (30s polling with stale data detection)
+- ✅ Cross-device resource aggregation (core-weighted CPU calculations)
+- ✅ Recipe-based app marketplace (20+ curated applications)
+- ✅ Automated deployment with health checks
+- ✅ WebSocket live updates for deployments and metrics
 
-Reference: [docs/architecture.md](docs/architecture.md)
+**In Development:**
+- 🚧 Shared database pooling
+- 🚧 Backup orchestration
+- 🚧 Firewall integration (OPNsense API)
+
+Reference: [docs/architecture.md](docs/architecture.md), [docs/database-schema.md](docs/database-schema.md)
 
 ## Tech Stack
 

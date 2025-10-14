@@ -491,3 +491,98 @@ export function useActiveInstallation(deviceId: string) {
     refetchInterval: 5000,
   })
 }
+
+// Resource monitoring query keys
+export const resourceKeys = {
+  all: ['resources'] as const,
+  aggregate: () => [...resourceKeys.all, 'aggregate'] as const,
+  device: (id: string) => [...resourceKeys.all, 'device', id] as const,
+  deviceHistory: (id: string, hours: number) => [...resourceKeys.device(id), 'history', hours] as const,
+  status: () => [...resourceKeys.all, 'status'] as const,
+}
+
+// Resource monitoring hooks
+export function useAggregateResources() {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time resource updates
+  useEffect(() => {
+    const handleResourceUpdates = (event: string, _data: unknown) => {
+      if (event === 'device_metrics_updated') {
+        // Invalidate aggregate resources to refetch with updated data
+        queryClient.invalidateQueries({ queryKey: resourceKeys.aggregate() })
+        // Also invalidate device list as it includes current resource metrics
+        queryClient.invalidateQueries({ queryKey: deviceKeys.lists() })
+      }
+    }
+
+    // Subscribe to resources channel
+    const unsubscribe = wsService.on('resources', handleResourceUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [queryClient])
+
+  return useQuery({
+    queryKey: resourceKeys.aggregate(),
+    queryFn: () => apiClient.getAggregateResources(),
+    // Poll every 30 seconds as fallback (WebSocket is primary)
+    refetchInterval: 30000,
+  })
+}
+
+export function useDeviceResources(deviceId: string) {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for real-time resource updates
+  useEffect(() => {
+    if (!deviceId) return
+
+    const handleResourceUpdates = (event: string, data: unknown) => {
+      if (event === 'device_metrics_updated') {
+        const metricsUpdate = data as { device_id: string }
+        // Only update if this is our device
+        if (metricsUpdate.device_id === deviceId) {
+          queryClient.invalidateQueries({ queryKey: resourceKeys.device(deviceId) })
+          // Also invalidate the device detail as it includes current resource metrics
+          queryClient.invalidateQueries({ queryKey: deviceKeys.detail(deviceId) })
+        }
+      }
+    }
+
+    // Subscribe to resources channel
+    const unsubscribe = wsService.on('resources', handleResourceUpdates)
+
+    return () => {
+      unsubscribe()
+    }
+  }, [deviceId, queryClient])
+
+  return useQuery({
+    queryKey: resourceKeys.device(deviceId),
+    queryFn: () => apiClient.getDeviceResources(deviceId),
+    enabled: !!deviceId,
+    // Poll every 30 seconds as fallback
+    refetchInterval: 30000,
+  })
+}
+
+export function useDeviceResourcesHistory(deviceId: string, hours: number = 24) {
+  return useQuery({
+    queryKey: resourceKeys.deviceHistory(deviceId, hours),
+    queryFn: () => apiClient.getDeviceResourcesHistory(deviceId, hours),
+    enabled: !!deviceId,
+    // Don't auto-refetch history data frequently
+    refetchInterval: false,
+  })
+}
+
+export function useResourceMonitoringStatus() {
+  return useQuery({
+    queryKey: resourceKeys.status(),
+    queryFn: () => apiClient.getResourceMonitoringStatus(),
+    // Check status every minute
+    refetchInterval: 60000,
+  })
+}

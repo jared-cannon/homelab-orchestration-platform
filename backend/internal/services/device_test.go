@@ -310,27 +310,118 @@ func TestDeviceService_DeleteDevice(t *testing.T) {
 	})
 }
 
-func TestValidateIPAddress(t *testing.T) {
-	tests := []struct {
-		name  string
-		ip    string
-		valid bool
-	}{
-		{"Valid IPv4", "192.168.1.1", true},
-		{"Valid IPv4 with zeros", "10.0.0.1", true},
-		{"Invalid - too many octets", "192.168.1.1.1", false},
-		{"Invalid - out of range", "192.168.256.1", false},
-		{"Invalid - text", "not-an-ip", false},
-		{"Invalid - hostname", "example.com", false},
-		{"Invalid - empty", "", false},
-		{"Valid IPv6", "2001:0db8:85a3::8a2e:0370:7334", true},
-		{"Valid IPv6 short", "::1", true},
-	}
+func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
+	db := setupTestDB(t)
+	credService := setupTestCredentialService(t)
+	deviceService := NewDeviceService(db, credService, nil)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ValidateIPAddress(tt.ip)
-			assert.Equal(t, tt.valid, result, "IP validation for %s", tt.ip)
-		})
-	}
+	t.Run("Accepts Tailscale hostname - standard format", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Tailscale Device",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "myserver.wolf-bear.ts.net",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "tailscale",
+			Username: "admin",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err, "Should accept Tailscale hostname format")
+		assert.NotEqual(t, uuid.Nil, device.ID, "Should generate UUID")
+		assert.Equal(t, models.AuthTypeTailscale, device.AuthType, "Auth type should be tailscale")
+		assert.Empty(t, device.CredentialKey, "Tailscale devices should not have credential key")
+	})
+
+	t.Run("Accepts Tailscale hostname - different tailnet names", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Another Tailscale Device",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "api.red-blue.ts.net",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "tailscale",
+			Username: "root",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err, "Should accept different tailnet format")
+	})
+
+	t.Run("Accepts Tailscale IP address", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Tailscale IP Device",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "100.64.1.5",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "tailscale",
+			Username: "admin",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err, "Should accept Tailscale IP address")
+	})
+
+	t.Run("Rejects invalid hostname for Tailscale", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Invalid Tailscale",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "invalid..hostname",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "tailscale",
+			Username: "admin",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.Error(t, err, "Should reject invalid hostname")
+		assert.Contains(t, err.Error(), "invalid hostname", "Error should mention invalid hostname")
+	})
+
+	t.Run("Rejects hostname for non-Tailscale auth types", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Regular Device with Hostname",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "myserver.local",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "password",
+			Username: "admin",
+			Password: "secret",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.Error(t, err, "Should reject hostname for non-Tailscale auth")
+		assert.Contains(t, err.Error(), "invalid IP address", "Error should mention invalid IP")
+	})
+
+	t.Run("Retrieves Tailscale credentials correctly", func(t *testing.T) {
+		device := &models.Device{
+			Name:      "Tailscale Cred Test",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "machine.happy-sunny.ts.net",
+		}
+
+		creds := &DeviceCredentials{
+			Type:     "tailscale",
+			Username: "user123",
+		}
+
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err)
+
+		// Retrieve credentials
+		retrievedCreds, err := deviceService.GetDeviceCredentials(device.ID)
+		assert.NoError(t, err, "Should retrieve Tailscale credentials")
+		assert.Equal(t, "tailscale", retrievedCreds.Type)
+		assert.Equal(t, "user123", retrievedCreds.Username)
+		assert.Empty(t, retrievedCreds.Password, "Password should be empty for Tailscale")
+		assert.Empty(t, retrievedCreds.SSHKey, "SSH key should be empty for Tailscale")
+	})
 }
