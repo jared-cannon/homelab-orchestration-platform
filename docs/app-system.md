@@ -1,12 +1,8 @@
 # App System Architecture
 
-**Version:** 1.0
-**Last Updated:** October 2025
-**Status:** In Development
-
 ## Overview
 
-Application marketplace and deployment system using standard Docker Compose format with intelligent orchestration enhancements. Combines user-facing features with programmatic deployment architecture.
+Application marketplace and deployment system using standard Docker Compose format with intelligent orchestration enhancements.
 
 ---
 
@@ -15,20 +11,12 @@ Application marketplace and deployment system using standard Docker Compose form
 ### Hybrid: Standard Compose + Intelligence Layer
 
 **Rejected Approach: Go Templates in YAML**
-```yaml
-compose_template: |
-  services:
-    app:
-      image: app:{{.Version}}
-      environment:
-        - DB_HOST={{.DatabaseHost}}
-```
 
-**Problems:**
-- Non-standard format
+Problems:
+- Non-standard format incompatible with Docker ecosystem
 - Cannot validate with docker-compose CLI
 - Difficult community contributions
-- Loses Docker ecosystem tooling
+- Loses Docker tooling support
 - Hard to test locally
 
 **Adopted Approach:**
@@ -36,9 +24,9 @@ compose_template: |
 Standard docker-compose.yaml → Intelligence Enhancement → Programmatic Deployment
 ```
 
-**Benefits:**
+Benefits:
 - Standard Docker Compose format
-- Community can contribute easily
+- Community contributions enabled
 - Works with ecosystem tooling (validation, IDEs)
 - Testable locally with `docker-compose up`
 - Intelligence added during deployment, not in template
@@ -118,7 +106,6 @@ post_install:
     message: |
       Vaultwarden ready at https://vaultwarden.${DOMAIN}
       Create admin account by visiting URL.
-      Disable signups after account creation.
 
 # Health monitoring
 health:
@@ -136,7 +123,7 @@ updates:
 
 ### docker-compose.yaml Specification
 
-Standard Docker Compose format. Environment variables substituted during deployment.
+Standard Docker Compose format with environment variable substitution during deployment.
 
 ```yaml
 version: '3.8'
@@ -146,7 +133,6 @@ services:
     image: vaultwarden/server:1.30.0
     restart: unless-stopped
 
-    # Variables injected by deployment service
     environment:
       - DOMAIN=https://${DOMAIN}
       - SIGNUPS_ALLOWED=${ALLOW_SIGNUPS}
@@ -165,7 +151,6 @@ services:
           memory: 1G
         reservations:
           memory: 512M
-      # Placement constraints added programmatically
 
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/alive"]
@@ -196,23 +181,21 @@ volumes:
 ### Technical Process
 
 ```
-1. User initiates deployment via UI
+1. Fetch manifest.yaml + docker-compose.yaml from repository
          ↓
-2. Fetch manifest.yaml + docker-compose.yaml from repository
-         ↓
-3. Intelligence Layer Enhancement:
+2. Intelligence Layer Enhancement:
    - Device selection (resource scoring algorithm)
-   - Database provisioning (if manifest.database.auto_provision)
-   - Cache provisioning (if manifest.cache.auto_provision)
+   - Database provisioning (if auto_provision enabled)
+   - Cache provisioning (if auto_provision enabled)
    - Secret generation (passwords, API keys)
    - Placement constraint injection
    - Environment variable substitution
          ↓
-4. Programmatic deployment via Docker Swarm API
+3. Programmatic deployment via Docker Swarm API
          ↓
-5. Post-install hook execution
+4. Post-install hook execution
          ↓
-6. Health monitoring activation
+5. Health monitoring activation
 ```
 
 ### State Machine
@@ -229,8 +212,6 @@ OR → StatusFailed → StatusRollingBack → StatusRolledBack
 ### MarketplaceService
 
 ```go
-// backend/internal/services/marketplace.go
-
 type MarketplaceService struct {
     db              *gorm.DB
     recipeLoader    *RecipeLoader
@@ -246,8 +227,6 @@ func (s *MarketplaceService) LoadRecipesFromDisk() error
 ### DeploymentService
 
 ```go
-// backend/internal/services/deployment_service.go
-
 type DeploymentService struct {
     db                   *gorm.DB
     sshClient            *ssh.Client
@@ -260,85 +239,22 @@ type DeploymentService struct {
     secretGenerator      *SecretGenerator
 }
 
-func (s *DeploymentService) Deploy(ctx context.Context, req DeployRequest) (*Deployment, error) {
-    // 1. Fetch app definition from registry
-    manifest, composeFile := s.appRegistry.FetchAppFiles(req.AppID)
-
-    // 2. Intelligent device selection
-    device, score := s.intelligentScheduler.SelectOptimalDevice(manifest.Requirements)
-
-    // 3. Provision dependencies (database, cache)
-    env := s.provisionDependencies(manifest, device)
-
-    // 4. Enhance compose with intelligence (placement constraints, labels)
-    enhancedCompose := s.enhanceCompose(composeFile, manifest, device, env)
-
-    // 5. Deploy programmatically via Docker Swarm API
-    services := s.deployToSwarm(req.AppID, enhancedCompose, device)
-
-    // 6. Run post-install hooks
-    s.runPostInstallHooks(manifest, services, env)
-
-    // 7. Health check
-    s.checkHealth(services, manifest.Health)
-
-    // 8. WebSocket updates throughout
-}
+func (s *DeploymentService) Deploy(ctx context.Context, req DeployRequest) (*Deployment, error)
 ```
 
-### Intelligence Enhancement
-
-```go
-func (d *DeploymentService) enhanceCompose(
-    composeYAML string,
-    manifest *Manifest,
-    device *Device,
-    env map[string]string,
-) (string, error) {
-    compose, err := parseComposeFile(composeYAML)
-    if err != nil {
-        return "", err
-    }
-
-    for serviceName, service := range compose.Services {
-        // Add placement constraints
-        if manifest.Requirements.Storage.Type == "ssd" {
-            service.Deploy.Placement.Constraints = append(
-                service.Deploy.Placement.Constraints,
-                "node.labels.storage == ssd",
-            )
-        }
-
-        // Add management labels
-        service.Deploy.Labels["homelab.app"] = manifest.ID
-        service.Deploy.Labels["homelab.version"] = manifest.Version
-        service.Deploy.Labels["homelab.managed"] = "true"
-
-        // Substitute environment variables
-        for i, envVar := range service.Environment {
-            service.Environment[i] = substituteEnv(envVar, env)
-        }
-    }
-
-    // Add overlay network
-    compose.Networks["homelab-overlay"] = NetworkConfig{
-        External: true,
-    }
-
-    // Attach services to overlay network
-    for _, service := range compose.Services {
-        service.Networks = append(service.Networks, "homelab-overlay")
-    }
-
-    return marshalCompose(compose)
-}
-```
+**Deployment Process:**
+1. Fetch app definition from registry
+2. Intelligent device selection via scoring algorithm
+3. Provision dependencies (database, cache)
+4. Enhance compose file (placement constraints, labels, env vars)
+5. Deploy programmatically via Docker Swarm API
+6. Run post-install hooks
+7. Activate health monitoring
+8. Send WebSocket updates throughout
 
 ### AppRegistry Service
 
 ```go
-// backend/internal/services/app_registry.go
-
 type AppRegistry struct {
     db         *gorm.DB
     httpClient *http.Client
@@ -381,81 +297,6 @@ GET    /api/v1/deployments/:id/troubleshoot     # Debug info
 
 ---
 
-## Frontend Components
-
-### Pages
-
-**MarketplacePage** (`/marketplace`)
-- Browse recipes grid
-- Search and filtering
-- Category navigation
-
-**RecipeDetailPage** (`/marketplace/:slug`)
-- Recipe details
-- Deploy button
-- Requirements display
-
-**DeploymentsPage** (`/deployments`)
-- User's deployed apps
-- Status indicators
-- Quick actions
-
-**DeploymentDetailPage** (`/deployments/:id`)
-- Deployment status
-- Container logs
-- Controls (start/stop/restart)
-
-### Key Components
-
-**RecipeCard**
-```tsx
-<RecipeCard recipe={recipe}>
-  - Icon
-  - Name + tagline
-  - Category badge
-  - Resource requirements (RAM, Storage)
-  - "Deploy" button
-</RecipeCard>
-```
-
-**DeploymentWizard**
-```tsx
-<DeploymentWizard recipe={recipe}>
-  Step 1: Select Device → AUTOMATIC with manual override
-    - System analyzes devices, scores them
-    - Auto-selects highest-scoring device
-    - Shows score and reasoning: "Server-02 (Score: 95) - 8GB RAM free, 40% load"
-    - User can override: "Deploy to a different device ▼"
-
-  Step 2: Resource Preview → Shows database sharing savings
-    - "NextCloud will use existing Postgres → Saves 1GB RAM"
-    - OR "No Postgres found → Will deploy shared instance (1.2GB RAM)"
-
-  Step 3: Configure Options (from recipe.config_options)
-    - Most apps: Zero config needed
-    - Advanced users: Show optional config
-
-  Step 4: Deploy (real-time progress via WebSocket)
-    - Shows: "Deploying shared Postgres...", "Creating database nextcloud_db...", etc.
-
-  Step 5: Success (post-deploy instructions + resource savings)
-    - "Saved 1GB RAM by using shared database"
-</DeploymentWizard>
-```
-
-**DeploymentCard**
-```tsx
-<DeploymentCard deployment={deployment}>
-  - Status badge (running/stopped/failed)
-  - App name + domain
-  - Quick actions: Start/Stop/Restart/Delete
-  - "View Logs" button
-  - Link to app URL
-</DeploymentCard>
-```
-
----
-
 ## App Repository Structure
 
 ### GitHub Repository
@@ -478,14 +319,10 @@ homelab-apps/ (GitHub repository)
 │   └── security.yaml
 ├── templates/
 │   └── app-template/
-├── scripts/
-│   ├── validate-app.sh
-│   ├── test-deploy.sh
-│   └── generate-index.sh
-└── .github/
-    └── workflows/
-        ├── validate-pr.yml
-        └── publish.yml
+└── scripts/
+    ├── validate-app.sh
+    ├── test-deploy.sh
+    └── generate-index.sh
 ```
 
 ### Catalog Index Format
@@ -516,64 +353,15 @@ homelab-apps/ (GitHub repository)
 
 ### Registry Synchronization
 
-```go
-func (r *AppRegistry) SyncRegistry() error {
-    indexURL := fmt.Sprintf("%s/index.json", r.repoURL)
-    resp, err := r.httpClient.Get(indexURL)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
+**SyncRegistry:**
+- Fetch index.json from GitHub repository
+- Parse app catalog
+- Update local database with new apps and versions
 
-    var index AppIndex
-    if err := json.NewDecoder(resp.Body).Decode(&index); err != nil {
-        return err
-    }
-
-    for _, app := range index.Apps {
-        existingApp, _ := r.db.GetApp(app.ID)
-
-        if existingApp == nil {
-            r.db.Create(&app)
-        } else if app.Version != existingApp.Version {
-            r.db.Update(&app)
-        }
-    }
-
-    return nil
-}
-
-func (r *AppRegistry) FetchAppFiles(appID string) (*Manifest, string, error) {
-    app, err := r.db.GetApp(appID)
-    if err != nil {
-        return nil, "", err
-    }
-
-    manifestResp, err := r.httpClient.Get(app.ManifestURL)
-    if err != nil {
-        return nil, "", err
-    }
-    defer manifestResp.Body.Close()
-
-    var manifest Manifest
-    if err := yaml.NewDecoder(manifestResp.Body).Decode(&manifest); err != nil {
-        return nil, "", err
-    }
-
-    composeResp, err := r.httpClient.Get(app.ComposeURL)
-    if err != nil {
-        return nil, "", err
-    }
-    defer composeResp.Body.Close()
-
-    composeBytes, err := io.ReadAll(composeResp.Body)
-    if err != nil {
-        return nil, "", err
-    }
-
-    return &manifest, string(composeBytes), nil
-}
-```
+**FetchAppFiles:**
+- Retrieve manifest.yaml and docker-compose.yaml from GitHub
+- Cache locally for deployment
+- Validate schemas
 
 ---
 
@@ -581,79 +369,20 @@ func (r *AppRegistry) FetchAppFiles(appID string) (*Manifest, string, error) {
 
 ### Version Detection
 
-```go
-type UpdateChecker struct {
-    registry *AppRegistry
-    db       *gorm.DB
-}
-
-func (u *UpdateChecker) CheckForUpdates() ([]AppUpdate, error) {
-    if err := u.registry.SyncRegistry(); err != nil {
-        return nil, err
-    }
-
-    var installed []Deployment
-    u.db.Find(&installed)
-
-    updates := []AppUpdate{}
-    for _, deployment := range installed {
-        latestApp, _ := u.registry.GetApp(deployment.AppID)
-        if latestApp == nil {
-            continue
-        }
-
-        if semver.Compare(latestApp.Version, deployment.Version) > 0 {
-            updates = append(updates, AppUpdate{
-                AppID:          deployment.AppID,
-                CurrentVersion: deployment.Version,
-                LatestVersion:  latestApp.Version,
-            })
-        }
-    }
-
-    return updates, nil
-}
-```
+**CheckForUpdates:**
+1. Sync registry from GitHub
+2. Compare installed app versions with latest versions
+3. Use semantic versioning for comparison
+4. Return list of available updates
 
 ### Rolling Update
 
-```go
-func (u *UpdateManager) UpdateApp(deploymentID uuid.UUID) error {
-    deployment, err := u.db.GetDeployment(deploymentID)
-    if err != nil {
-        return err
-    }
-
-    manifest, compose, err := u.registry.FetchAppFiles(deployment.AppID)
-    if err != nil {
-        return err
-    }
-
-    // Create backup
-    if err := u.backup.Create(deployment); err != nil {
-        return err
-    }
-
-    // Deploy new version
-    newDeployment, err := u.deployer.DeployApp(deployment.AppID, deployment.UserConfig)
-    if err != nil {
-        u.deployer.Rollback(deployment)
-        return err
-    }
-
-    // Health check with timeout
-    healthy, err := u.healthChecker.Check(newDeployment, 60*time.Second)
-    if err != nil || !healthy {
-        u.deployer.Rollback(newDeployment)
-        return fmt.Errorf("health check failed, rolled back")
-    }
-
-    // Remove old deployment
-    u.deployer.Remove(deployment)
-
-    return nil
-}
-```
+**UpdateApp:**
+1. Create backup of current deployment
+2. Deploy new version with enhanced compose
+3. Health check with timeout (60s)
+4. If health check fails: Rollback to previous version
+5. If successful: Remove old deployment
 
 ---
 
@@ -661,167 +390,29 @@ func (u *UpdateManager) UpdateApp(deploymentID uuid.UUID) error {
 
 ### Adding New Apps
 
-**1. Repository Fork**
+**Process:**
+1. Fork GitHub repository
+2. Create app directory with manifest.yaml + docker-compose.yaml
+3. Validate locally:
+   - `docker-compose config` - validate syntax
+   - Schema validation for manifest.yaml
+   - Test deployment
+4. Submit pull request
+5. CI pipeline validates (YAML syntax, schema, security scan)
+6. After approval, app appears in marketplace
 
-**2. App Scaffolding**
-```bash
-$ homelab-cli create-app
+### Validation Requirements
 
-App name: Monica
-Category: productivity
-Docker image: monica:latest
-Requires database: yes
-Database engine: mysql
-
-Generated: apps/monica/
-```
-
-**3. File Customization**
-
-Edit `manifest.yaml` with requirements, `docker-compose.yaml` if needed.
-
-**4. Local Validation**
-```bash
-$ homelab-cli validate monica
-✓ manifest.yaml valid
-✓ docker-compose.yaml valid
-✓ All files present
-
-$ docker-compose -f apps/monica/docker-compose.yaml config
-# Verify output
-```
-
-**5. Pull Request Submission**
-
-CI pipeline validates:
-- YAML syntax
-- Schema compliance
-- Docker image security scan
+**CI Pipeline Checks:**
+- YAML syntax validation
+- Schema compliance (manifest.yaml)
+- Docker Compose validation
+- Docker image security scan (Trivy)
 - Test deployment
 
-**6. Merge and Publish**
-
-App becomes available in marketplace after approval.
-
-### GitHub Actions Validation
-
-```yaml
-# .github/workflows/validate-app.yml
-name: Validate App
-on:
-  pull_request:
-    paths:
-      - 'apps/**'
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Identify changed apps
-        id: changed
-        run: |
-          APPS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} | grep '^apps/' | cut -d/ -f2 | sort -u)
-          echo "apps=$APPS" >> $GITHUB_OUTPUT
-
-      - name: Validate manifests
-        run: |
-          for app in ${{ steps.changed.outputs.apps }}; do
-            node scripts/validate-manifest.js apps/$app/manifest.yaml
-          done
-
-      - name: Validate compose files
-        run: |
-          for app in ${{ steps.changed.outputs.apps }}; do
-            docker-compose -f apps/$app/docker-compose.yaml config
-          done
-
-      - name: Security scan
-        run: |
-          for app in ${{ steps.changed.outputs.apps }}; do
-            IMAGE=$(grep 'image:' apps/$app/docker-compose.yaml | head -1 | awk '{print $2}')
-            trivy image --severity HIGH,CRITICAL $IMAGE
-          done
-```
-
 ---
 
-## Implementation Plan
-
-### Phase 1: Foundation ✅ COMPLETED
-1. ✅ Recipe YAML schema (old format with templates)
-2. ✅ RecipeLoader service (local file loading)
-3. ✅ Marketplace database migrations
-4. ✅ API endpoints for recipes
-5. ✅ Frontend: Marketplace page with grid
-
-**Deliverable:** Backend serves recipes via API (old format)
-
-### Phase 2: Hybrid Architecture Migration (Current)
-1. **Define new format** ✅
-   - Separate manifest.yaml + docker-compose.yaml
-   - Standard Docker Compose (no Go templates)
-
-2. **AppRegistry Service** (In Progress)
-   - Fetch apps from GitHub repository
-   - Parse manifest.yaml + docker-compose.yaml
-   - Cache locally in database
-   - Update checking mechanism
-
-3. **Programmatic Deployment** (In Progress)
-   - Parse standard docker-compose.yaml
-   - Enhance with intelligent placement constraints
-   - Substitute environment variables
-   - Deploy via Docker Swarm API
-
-4. **DeploymentService Refactor** (Pending)
-   - Remove template rendering
-   - Add compose enhancement logic
-   - Add dependency provisioning (database, cache)
-   - Integrate with IntelligentScheduler
-
-**Deliverable:** Deploy apps from GitHub repository with intelligent orchestration
-
-### Phase 3: Management & Monitoring (Week 3)
-1. Deployments list page
-2. Start/Stop/Restart/Delete actions
-3. Container logs streaming (WebSocket)
-4. Health checks
-5. Post-deployment instructions display
-
-**Deliverable:** Full lifecycle management
-
-### Phase 4: Additional Recipes (Week 4)
-1. Add 5-10 curated recipes:
-   - Vaultwarden (password manager)
-   - Uptime Kuma (monitoring)
-   - Jellyfin (media server)
-   - Immich (photo library)
-   - Nextcloud (file sync)
-   - Paperless-ngx (document management)
-   - Homepage (dashboard)
-2. Recipe validation tests
-3. Documentation for custom recipes
-
-**Deliverable:** Production-ready marketplace
-
----
-
-## Technical Benefits
-
-### Advantages
-
-| Aspect | Template Approach | Standard Compose Approach |
-|--------|-------------------|---------------------------|
-| Format | Custom Go template | Standard Docker Compose |
-| Validation | Custom parser | `docker-compose config` |
-| Testing | Complex | `docker-compose up` |
-| Community | High barrier | Low barrier |
-| Tooling | None | Full ecosystem |
-| Intelligence | In template | In deployment layer |
-
-### Architecture Flow
+## Architecture Flow
 
 ```
 GitHub Repository (Standard Compose Files)
@@ -829,6 +420,10 @@ GitHub Repository (Standard Compose Files)
      Registry Service (Sync)
             ↓
     Intelligence Layer (Enhancement)
+    - Device selection
+    - Dependency provisioning
+    - Placement constraints
+    - Environment substitution
             ↓
    Docker Swarm API (Deployment)
             ↓
@@ -836,3 +431,9 @@ GitHub Repository (Standard Compose Files)
 ```
 
 The intelligence layer enhances standard compose files during deployment rather than embedding logic in templates. This maintains compatibility with Docker ecosystem while adding intelligent orchestration features.
+
+---
+
+**Version:** 1.0
+**Last Updated:** October 2025
+**Status:** In Development

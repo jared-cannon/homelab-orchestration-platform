@@ -14,6 +14,8 @@ JWT-based authentication system with bcrypt password hashing and frontend sessio
 - Cross-tab synchronization
 - Session persistence
 
+---
+
 ## Setup
 
 ### Backend Configuration
@@ -24,8 +26,7 @@ Create `.env` in `backend/` directory:
 # Enable authentication (REQUIRED for production)
 REQUIRE_AUTH=true
 
-# JWT Secret - Generate a secure random key
-# Example: openssl rand -base64 32
+# JWT Secret (generate: openssl rand -base64 32)
 JWT_SECRET=your-super-secret-jwt-key-here
 
 # Server Configuration
@@ -37,21 +38,17 @@ DB_PATH=./homelab.db
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
-### Generate JWT Secret
-
-Production requires secure random JWT secret (minimum 32 characters):
-
+**Generate JWT Secret:**
 ```bash
 openssl rand -base64 32
 ```
 
-### Start Server
-
+**Start Server:**
 ```bash
 make dev
-# or
-cd backend && go run cmd/server/main.go
 ```
+
+---
 
 ## Authentication Flow
 
@@ -69,29 +66,36 @@ cd backend && go run cmd/server/main.go
 2. Enter credentials
 3. JWT token issued and stored in localStorage
 4. Redirect to devices page
-5. Token validated on page reload
 
 ### Logout
 
 - Logout button in navigation
 - Token removed from localStorage
 - Redirect to login page
-- Cross-tab synchronization
+
+---
 
 ## API Endpoints
 
 ### Public Endpoints
 
-- `POST /api/v1/auth/register` - Create first admin user
-- `POST /api/v1/auth/login` - Login, receive JWT token
+```
+POST /api/v1/auth/register   # Create first admin user
+POST /api/v1/auth/login      # Login, receive JWT token
+```
 
 ### Protected Endpoints
 
-- `GET /api/v1/auth/me` - Current user information
-- `POST /api/v1/auth/change-password` - Change password
-- `GET /api/v1/devices` - List devices
-- `POST /api/v1/devices` - Create device
-- All device/scanner endpoints
+```
+GET  /api/v1/auth/me                # Current user information
+POST /api/v1/auth/change-password   # Change password
+GET  /api/v1/devices                # List devices
+POST /api/v1/devices                # Create device
+```
+
+All device/scanner endpoints require authentication.
+
+---
 
 ## Frontend Implementation
 
@@ -112,8 +116,6 @@ const loginMutation = useLogin()
 loginMutation.mutate({ username: 'admin', password: 'password' })
 
 const logout = useLogout()
-logout()
-
 const { user, isAuthenticated } = useCurrentUser()
 ```
 
@@ -132,11 +134,11 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 />
 ```
 
+---
+
 ## Security Best Practices
 
-### Production
-
-Requirements:
+### Production Requirements
 
 1. Enable authentication: `REQUIRE_AUTH=true`
 2. Strong JWT secret (minimum 32 characters, secure random)
@@ -149,6 +151,8 @@ Requirements:
 Optional: Disable authentication with `REQUIRE_AUTH=false`
 
 **WARNING**: Never disable in production.
+
+---
 
 ## Token Management
 
@@ -170,6 +174,8 @@ Optional: Disable authentication with `REQUIRE_AUTH=false`
 - Invalid tokens return 401
 - Automatic logout on 401
 
+---
+
 ## User Management
 
 ### Admin Users
@@ -184,64 +190,24 @@ Optional: Disable authentication with `REQUIRE_AUTH=false`
 - Limited permissions (planned)
 - Device/application access control (planned)
 
-## Troubleshooting
+---
 
-### Authentication middleware DISABLED
+## Common Issues
 
-Set `REQUIRE_AUTH=true` in `.env`
+**Authentication middleware DISABLED**
+- Set `REQUIRE_AUTH=true` in `.env`
 
-### Invalid or expired token
+**Invalid or expired token**
+- Token expired (>24 hours)
+- JWT_SECRET changed
+- Clear token: `localStorage.removeItem('homelab_auth_token')`
 
-Causes:
-1. Token expired (>24 hours)
-2. JWT_SECRET changed
-3. Invalid token format
+**CORS errors**
+- Add frontend URL to `ALLOWED_ORIGINS`
 
-Solution:
-```javascript
-localStorage.removeItem('homelab_auth_token')
-// Reload and re-login
-```
+---
 
-### Username already exists
+## Reference
 
-Navigate to `/login` instead of `/setup`
-
-### CORS errors
-
-Add frontend URL to `ALLOWED_ORIGINS`:
-```env
-ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.100:5173
-```
-
-## Testing
-
-### Auth Flow
-
-1. Clean database (optional): `rm backend/homelab.db`
-2. Start servers: `make dev`
-3. Test setup: Visit `http://localhost:5173/setup`
-   - Create admin account
-   - Verify redirect to devices
-   - Check navigation shows username
-4. Test logout: Click logout → redirect to login → unauthenticated access blocked
-5. Test login: Enter credentials → redirect to devices → token persists on reload
-6. Test protected routes: Logout → access `/` → verify redirect to `/login`
-
-## Future Enhancements
-
-- Refresh tokens
-- Password reset
-- Two-factor authentication
-- OAuth integration
-- User management UI
-- Role-based permissions
-- API rate limiting
-- Audit logging
-
-## Support
-
-Reference:
 - `/backend/internal/middleware/auth.go`
 - `/frontend/src/hooks/useAuth.ts`
-- GitHub issues
