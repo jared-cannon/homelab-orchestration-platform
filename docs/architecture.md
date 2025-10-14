@@ -1,53 +1,351 @@
-Homelab Orchestration Platform - Software Architecture Document
-Version: 0.2 MVP (Revised)
-Last Updated: October 2025
-Philosophy: "Make self-hosting as simple as signing up for a SaaS product"
+# Software Architecture
+
+**Version:** 0.3 MVP (Unified Orchestration)
+**Last Updated:** October 2025
 
 ## Version History
+- **v0.3** (Oct 2025): **Unified orchestration focus** - Shift to multi-node intelligence, resource sharing, intelligent placement as MVP core features
 - **v0.2** (Oct 2025): Architecture review, critical fixes, monorepo decision
 - **v0.1** (Oct 2025): Initial design
 
-## ⚠️ Critical Updates from v0.1
-Based on design review, the following critical issues were identified and addressed:
+## Critical Updates from v0.1
 
-1. **Redis Dependency Removed**: Asynq requires Redis server, breaking "single binary" promise
-   - ✅ Solution: Use in-memory job queue for MVP (channels + goroutines), add Redis later for scale
+Design review identified and addressed critical issues:
 
-2. **Rollback Strategy Added**: Original design had no transaction-like rollback for failed deployments
-   - ✅ Solution: Implement deployment state machine with automatic cleanup on failure
+1. **Redis Dependency Removed**: In-memory job queue for MVP (channels + goroutines), Redis migration path for scale
 
-3. **Idempotency Required**: Re-running deployments could create duplicate resources
-   - ✅ Solution: All operations check existing state before creating (DNS, containers, proxy rules)
+2. **Rollback Strategy Added**: Deployment state machine with automatic cleanup on failure
 
-4. **Credential Security Enhanced**: Master key in `~/.homelab/key` is single point of failure
-   - ✅ Solution: Integrate OS keychain from start (macOS Keychain, Linux Secret Service, Windows DPAPI)
+3. **Idempotency Required**: All operations check existing state before creating
 
-5. **Docker Bootstrap Problem**: Assumes Docker installed, no validation
-   - ✅ Solution: Pre-flight checks + helpful error messages with install instructions
+4. **Credential Security Enhanced**: OS keychain integration (macOS Keychain, Linux Secret Service, Windows DPAPI)
 
-6. **Network Discovery Limitations**: mDNS/ARP don't work across VLANs
-   - ✅ Solution: Manual IP entry as primary method, discovery as convenience feature
+5. **Docker Bootstrap**: Pre-flight checks with install instructions
 
-7. **OPNsense API Update**: XML-RPC is legacy, AdGuard might not be installed
-   - ✅ Solution: Use OPNsense REST API, make AdGuard optional with graceful degradation
+6. **Network Discovery**: Manual IP entry as primary method, discovery as convenience feature
 
-8. **Port Conflict Detection**: No validation before binding ports
-   - ✅ Solution: Check port availability in pre-flight validation
+7. **OPNsense API**: REST API (not XML-RPC), AdGuard optional with graceful degradation
 
-9. **Monorepo vs Multi-repo**: Decision needed for clean development
-   - ✅ Solution: Monorepo with embedded frontend (details in Section 5)
+8. **Port Conflict Detection**: Pre-flight port availability validation
+
+9. **Monorepo**: Embedded frontend architecture
 
 1. Vision & Design Philosophy
-Inspired by Laravel Herd's approach to developer experience:
 
-Complexity hidden, not removed - Power users can still access raw configs
-Convention over configuration - Smart defaults that work for 90% of use cases
-One-click operations - Deploy Immich shouldn't require reading docs
-Beautiful, native-feeling UI - Not another corporate dashboard
-Reversible actions - Everything can be undone or rolled back
-Escape hatches everywhere - Link to OPNsense admin, show generated docker-compose, export configs
+## The "Ubiquiti for Homelabs" Vision
 
-Core Principle: If it takes more than 3 clicks or requires terminal access, we've failed.
+Ubiquiti succeeded by making enterprise networking accessible to prosumers. We're doing the same for homelab orchestration.
+
+### What Ubiquiti Did for Networking
+
+**Before Ubiquiti:**
+- Complex enterprise gear (Cisco, Juniper) OR consumer junk (Linksys)
+- Nothing in between
+
+**Ubiquiti's Innovation:**
+- Enterprise features with consumer-friendly UI
+- Unified management (UniFi Controller = single pane of glass)
+- Beautiful hardware + beautiful software
+- Accessible pricing
+
+### What We're Doing for Homelabs
+
+**Before This Tool:**
+```
+Power User: Proxmox + Kubernetes + manual Docker
+            (Complex but powerful)
+              ↓ [Big Gap] ↓
+Beginner:   Synology apps, Raspberry Pi projects
+            (Simple but limited)
+```
+
+**With This Tool:**
+```
+┌───────────────────────────────────────────────────┐
+│ Anyone can run a production-grade homelab         │
+│ - Simple as CasaOS                                │
+│ - Powerful as Proxmox                             │
+│ - Intelligent like Kubernetes                     │
+│ - Unified like UniFi Controller                   │
+└───────────────────────────────────────────────────┘
+```
+
+### Core Principles
+
+1. **Unified Infrastructure Model**: Your homelab is ONE system with distributed resources
+   - Not "3 Raspberry Pis and 2 servers"
+   - But "My homelab has 24GB RAM, 12 CPU cores, 2TB storage"
+
+2. **Intelligent Orchestration**: System decides optimal placement
+   - User: "Deploy NextCloud"
+   - System: "Analyzing... Server-02 has 8GB RAM free and SSD storage → deploying there"
+
+3. **Resource Sharing**: Eliminate container sprawl
+   - Instead of: 5 apps × 5 separate Postgres containers = 5GB RAM
+   - We do: 5 apps → 1 shared Postgres instance = 1.5GB RAM (saves 3.5GB)
+
+4. **Infrastructure Abstraction**: User doesn't manage devices, they manage their homelab
+   - Not: "Deploy to which device?"
+   - But: "Deploy" (system handles placement)
+
+5. **Complexity Hidden, Not Removed**: Power users retain full control
+   - Show generated docker-compose.yml
+   - Export configs
+   - Override intelligent placement
+   - 90% zero-config, 10% full control
+
+### What Makes Us Different
+
+| Feature | CasaOS / Coolify | Proxmox | Us |
+|---------|------------------|---------|-----|
+| **Multi-node** | ❌ Single node | ✅ Yes | ✅ **Unified orchestration** |
+| **Intelligent placement** | ❌ No | ❌ Manual | ✅ **Automatic** |
+| **Resource sharing** | ❌ No | ⚠️ Manual | ✅ **Automatic database pooling** |
+| **Unified view** | ❌ Per-device | ⚠️ Cluster view | ✅ **Aggregate resources** |
+| **Simplicity** | ✅ Very simple | ❌ Complex | ✅ **Simple + powerful** |
+| **Target user** | Beginners | Power users | **Power users who want simplicity** |
+
+## 1.1 Core Differentiator: Intelligent Orchestration
+
+This is what sets us apart from every other homelab tool. Not just multi-node management, but **intelligent multi-node orchestration**.
+
+### Intelligent Placement Algorithm
+
+When user clicks "Deploy NextCloud", the system:
+
+```go
+type IntelligentScheduler struct {
+    deviceService   *DeviceService
+    resourceMonitor *ResourceMonitor
+}
+
+func (s *IntelligentScheduler) SelectOptimalDevice(app *Recipe) (*Device, *PlacementScore, error) {
+    // 1. Get all available devices
+    devices := s.deviceService.ListDevices()
+
+    // 2. Score each device
+    scores := []PlacementScore{}
+    for _, device := range devices {
+        score := s.calculatePlacementScore(app, device)
+        scores = append(scores, score)
+    }
+
+    // 3. Sort by score (highest = best)
+    sort.Sort(sort.Reverse(scores))
+
+    // 4. Return best device with reasoning
+    return scores[0].Device, &scores[0], nil
+}
+
+func (s *IntelligentScheduler) calculatePlacementScore(app *Recipe, device *Device) PlacementScore {
+    score := PlacementScore{Device: device}
+
+    // Factor 1: Available RAM (40% weight)
+    ramAvailable := device.TotalRAM - device.UsedRAM
+    if ramAvailable >= app.RecommendedRAM {
+        score.RAMScore = 100
+    } else if ramAvailable >= app.MinRAM {
+        score.RAMScore = 50
+    } else {
+        score.RAMScore = 0 // Disqualify
+    }
+
+    // Factor 2: Available Storage (30% weight)
+    storageAvailable := device.TotalStorage - device.UsedStorage
+    if storageAvailable >= app.RecommendedStorage {
+        score.StorageScore = 100
+    } else if storageAvailable >= app.MinStorage {
+        score.StorageScore = 50
+    } else {
+        score.StorageScore = 0 // Disqualify
+    }
+
+    // Factor 3: CPU Capability (15% weight)
+    // Prefer more powerful CPUs for resource-intensive apps
+    score.CPUScore = (device.CPUCores / app.RecommendedCPUCores) * 100
+
+    // Factor 4: Current Load (10% weight)
+    // Prefer devices with lower current load
+    loadPercentage := (device.UsedRAM / device.TotalRAM) * 100
+    score.LoadScore = 100 - loadPercentage
+
+    // Factor 5: Reliability (5% weight)
+    // Prefer devices with high uptime
+    score.ReliabilityScore = device.UptimePercentage
+
+    // Calculate weighted total
+    score.TotalScore = (score.RAMScore * 0.40) +
+                       (score.StorageScore * 0.30) +
+                       (score.CPUScore * 0.15) +
+                       (score.LoadScore * 0.10) +
+                       (score.ReliabilityScore * 0.05)
+
+    // Generate reasoning
+    score.Reasoning = fmt.Sprintf(
+        "Selected %s: %dGB RAM available, %dGB storage, %.0f%% current load",
+        device.Name, ramAvailable/1024/1024/1024, storageAvailable/1024/1024/1024, loadPercentage,
+    )
+
+    return score
+}
+```
+
+**User Experience:**
+```
+User: "Deploy Vaultwarden"
+
+System analyzes:
+✓ Server-01: Score 85 (4GB RAM free, but 80% loaded)
+✓ Server-02: Score 95 (8GB RAM free, only 40% loaded) ← Selected
+✓ Pi-4:      Score 60 (2GB RAM free, sufficient but lower reliability)
+
+System: "Deploying to Server-02 (best match: 8GB RAM available, 40% current load)"
+```
+
+### Database Pooling Architecture
+
+Instead of each app deploying its own database container, we intelligently share database instances:
+
+```go
+type DatabasePool struct {
+    postgresInstances map[uuid.UUID]*DatabaseInstance // deviceID -> instance
+    mysqlInstances    map[uuid.UUID]*DatabaseInstance
+}
+
+func (p *DatabasePool) GetOrCreatePostgresInstance(deviceID uuid.UUID) (*DatabaseInstance, error) {
+    // Check if Postgres already running on this device
+    if instance, exists := p.postgresInstances[deviceID]; exists {
+        return instance, nil
+    }
+
+    // Deploy shared Postgres instance
+    instance := &DatabaseInstance{
+        DeviceID:     deviceID,
+        Type:         "postgres",
+        ContainerID:  generateContainerID(),
+        Databases:    []string{},
+    }
+
+    // Deploy using Docker Compose
+    if err := p.deployPostgresContainer(deviceID); err != nil {
+        return nil, err
+    }
+
+    p.postgresInstances[deviceID] = instance
+    return instance, nil
+}
+
+func (p *DatabasePool) ProvisionDatabase(app *Deployment, dbType string) (*DatabaseCredentials, error) {
+    // 1. Get or create shared database instance
+    instance, err := p.GetOrCreatePostgresInstance(app.DeviceID)
+    if err != nil {
+        return nil, err
+    }
+
+    // 2. Create new database for this app
+    dbName := fmt.Sprintf("%s_db", app.RecipeSlug)
+    dbUser := fmt.Sprintf("%s_user", app.RecipeSlug)
+    dbPassword := generateSecurePassword()
+
+    // 3. Execute SQL commands
+    commands := []string{
+        fmt.Sprintf("CREATE DATABASE %s;", dbName),
+        fmt.Sprintf("CREATE USER %s WITH PASSWORD '%s';", dbUser, dbPassword),
+        fmt.Sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s;", dbName, dbUser),
+    }
+
+    for _, cmd := range commands {
+        if err := instance.ExecuteSQL(cmd); err != nil {
+            return nil, err
+        }
+    }
+
+    // 4. Return credentials for app
+    return &DatabaseCredentials{
+        Host:     instance.InternalIP,
+        Port:     5432,
+        Database: dbName,
+        Username: dbUser,
+        Password: dbPassword,
+    }, nil
+}
+```
+
+**Result:**
+```
+Before (Traditional Docker Compose):
+- NextCloud → Postgres container (1GB RAM)
+- Monica → Postgres container (1GB RAM)
+- Paperless → Postgres container (1GB RAM)
+Total: 3GB RAM
+
+After (Our System):
+- Shared Postgres container (1.2GB RAM)
+  ├── nextcloud_db
+  ├── monica_db
+  └── paperless_db
+Total: 1.2GB RAM (saves 1.8GB = 60% reduction)
+```
+
+### Cross-Device Resource Aggregation
+
+Unified dashboard shows total resources across all devices:
+
+```go
+type AggregateResources struct {
+    TotalRAM       uint64 // Sum of all device RAM
+    UsedRAM        uint64 // Sum of all used RAM
+    TotalStorage   uint64 // Sum of all device storage
+    UsedStorage    uint64 // Sum of all used storage
+    TotalCPUCores  int    // Sum of all CPU cores
+    AvgCPUUsage    float64 // Average CPU usage across devices
+
+    Devices        []Device
+    OnlineDevices  int
+    OfflineDevices int
+    TotalApps      int
+}
+
+func (s *ResourceMonitor) GetAggregateResources() (*AggregateResources, error) {
+    devices := s.deviceService.ListDevices()
+    agg := &AggregateResources{}
+
+    for _, device := range devices {
+        if device.Status == DeviceStatusOnline {
+            agg.TotalRAM += device.TotalRAM
+            agg.UsedRAM += device.UsedRAM
+            agg.TotalStorage += device.TotalStorage
+            agg.UsedStorage += device.UsedStorage
+            agg.TotalCPUCores += device.CPUCores
+            agg.AvgCPUUsage += device.CPUUsage
+            agg.OnlineDevices++
+        } else {
+            agg.OfflineDevices++
+        }
+    }
+
+    agg.AvgCPUUsage /= float64(agg.OnlineDevices)
+    agg.Devices = devices
+
+    return agg, nil
+}
+```
+
+**Dashboard Display:**
+```
+┌─────────────────────────────────────────────────┐
+│  Homelab Overview                               │
+├─────────────────────────────────────────────────┤
+│  Total Resources Across 3 Devices:              │
+│  ┌──────────────────────────────────────────┐   │
+│  │ RAM:     ████████░░░░  24GB / 32GB       │   │
+│  │ Storage: ████░░░░░░░░  500GB / 2TB       │   │
+│  │ CPU:     ███████░░░░░  12 cores, 65% avg │   │
+│  └──────────────────────────────────────────┘   │
+│                                                  │
+│  12 apps running • 3 devices online              │
+└─────────────────────────────────────────────────┘
+```
 
 2. Functional Requirements (MVP)
 2.1 Device Management
@@ -1217,21 +1515,34 @@ This section tracks key architectural decisions made during development.
 
 ---
 
-### Phase 1: Core Infrastructure (Weeks 2-4) 🚧 IN PROGRESS
-🎯 **Goal**: Device management with SSH + validation, basic dashboard
+### Phase 1: Multi-Node Intelligence (Weeks 2-6) 🚧 IN PROGRESS
+🎯 **Goal**: **Core differentiator features** - Intelligent placement, resource aggregation, multi-node orchestration
 
-**Backend**:
-- [x] Database schema design + GORM models (Device, Application, Deployment)
-- [x] SQL migrations setup (GORM auto-migrate)
+**Priority: Build what makes us DIFFERENT first**
+
+**Intelligent Orchestration (NEW - MVP CORE):**
+- [ ] **IntelligentScheduler service** - Resource scoring algorithm
+  - Score devices based on: RAM, storage, CPU, current load, uptime
+  - `SelectOptimalDevice(app)` returns best device + reasoning
+  - Override mechanism for manual device selection
+- [ ] **Resource aggregation service** - Cross-device monitoring
+  - `GetAggregateResources()` returns total RAM/CPU/storage across all devices
+  - Real-time resource usage tracking per device
+  - Device health scoring
+- [ ] **Database pooling service** (simplified for MVP)
+  - Detect if Postgres/MySQL already deployed on device
+  - Deploy shared database instance if needed
+  - API for provisioning new database/user in shared instance
+  - Future: Automatic database provisioning from recipes
+
+**Multi-Device Management (ENHANCED):**
 - [x] Device CRUD API endpoints
-- [ ] JWT authentication + middleware (deferred to Phase 2)
 - [x] SSH client wrapper with connection pooling
 - [x] Docker installation checker (pre-flight validation)
-- [x] Port availability checker
 - [x] Device health monitoring (ping, Docker API status)
-- [x] Error handling with user-friendly messages
-- [x] OS keychain integration for credentials
-- [x] WebSocket hub for real-time updates
+- [ ] **Multi-device dashboard** - Show aggregate resources
+- [ ] **Device resource polling** - Update RAM/CPU/storage every 30s
+- [ ] **Smart device recommendations** - "Server-02 recommended for this app"
 
 **Network Integration** (deferred to Phase 2/3):
 - [ ] OPNsense REST API client (not XML-RPC)
@@ -1255,65 +1566,91 @@ This section tracks key architectural decisions made during development.
 
 ---
 
-### Phase 2: Single-App Deployment (Weeks 5-7)
-🎯 **Goal**: Deploy first simple app (Vaultwarden) with rollback
+### Phase 2: Intelligent Deployment UX (Weeks 7-9)
+🎯 **Goal**: **Surface the intelligence** - UI that showcases multi-node orchestration
 
-**Deployment Engine**:
-- [ ] In-memory job queue (channels + worker pool)
-- [ ] Template engine for docker-compose generation
-- [ ] Deployment state machine (validating → deploying → running)
-- [ ] **Rollback manager with LIFO cleanup**
-- [ ] **Idempotency checks for all operations**
-- [ ] Pre-flight validation (resources, ports, Docker)
-- [ ] Health check after deployment
-- [ ] Debug/transparency endpoint (show generated compose, SSH commands)
+**App Repository Architecture (NEW):**
+- [ ] Implement AppRegistry service - Fetch apps from GitHub repository
+- [ ] Standard docker-compose.yaml format (no Go templates)
+- [ ] Separate manifest.yaml for platform metadata
+- [ ] Programmatic deployment via Docker Swarm API
+- [ ] Compose enhancement with intelligent placement constraints
+- [ ] See [docs/app-repository.md](app-repository.md) for complete specification
 
-**Application Catalog**:
-- [ ] Hardcode 2 simple apps: Vaultwarden, Uptime Kuma
-- [ ] App metadata (RAM, disk requirements, icon, description)
-- [ ] Docker-compose templates for each app
+**Smart Deployment Wizard (NEW FOCUS):**
+- [ ] **Automatic device selection** - System picks best device by default
+  - "Analyzing your homelab..." loading state
+  - "Recommended: Server-02 (8GB RAM available, 40% load)" with score explanation
+  - Allow manual override: "Or deploy to a different device"
+- [ ] **Resource availability preview** - Show what's available across ALL devices
+  - Before deployment: "Your homelab has 16GB RAM free across 3 devices"
+  - After selection: "Server-02 selected: 8GB RAM free, 500GB storage"
+- [ ] **Database sharing indicators** - Show when apps will share resources
+  - "NextCloud will use existing Postgres instance (saves 1GB RAM)"
+  - "No Postgres found, deploying shared instance (1.2GB RAM)"
 
-**Frontend**:
-- [ ] App catalog page with cards
-- [ ] Deployment wizard (select app → choose device → configure → deploy)
-- [ ] Real-time deployment progress (WebSocket)
-- [ ] Deployment detail page with logs
-- [ ] "Show me what you did" debug view
+**Frontend Enhancements:**
+- [ ] **Unified dashboard** - Aggregate resource view
+  - Total RAM/CPU/storage bars
+  - Online devices count
+  - Total apps deployed
+  - Quick actions for common tasks
+- [ ] **Deployment wizard updates**
+  - Step 1: App selection (existing)
+  - Step 2: **NEW** - Smart device recommendation (auto-selected)
+  - Step 3: Configuration (simplified, most apps zero-config)
+  - Step 4: Real-time deployment progress
+- [ ] **Device comparison view** - Show all devices with resource scores
+  - Side-by-side device cards
+  - Highlight recommended device
+  - Show reasoning for each score
 
-**Deliverable**: ✅ Click "Deploy Vaultwarden" → 2 min later, running on device (or rollback on failure)
-
----
-
-### Phase 3: Reverse Proxy Automation (Weeks 8-10)
-🎯 **Goal**: Automatic reverse proxy + DNS, accessible at pretty URLs
-
-**Proxy Management**:
-- [ ] NGINX Proxy Manager auto-deployment
-- [ ] NPM API client (create/update/delete proxy rules)
-- [ ] Self-signed certificate generation
-- [ ] Idempotent proxy rule creation
-
-**DNS Management**:
-- [ ] AdGuard Home API client (if available)
-- [ ] DNS rewrite creation (check if exists first)
-- [ ] Fallback: Show manual DNS instructions if AdGuard unavailable
-- [ ] Test: App accessible at https://vaultwarden.home
-
-**Additional Apps**:
-- [ ] Add Jellyfin template
-- [ ] Add Immich template (complex multi-container app)
-
-**Frontend**:
-- [ ] Network overview page (DNS rewrites, proxy rules)
-- [ ] Manual DNS instruction modal (if auto-config fails)
-- [ ] Domain configuration in deployment wizard
-
-**Deliverable**: ✅ Apps accessible at https://app.home with automatic DNS + proxy setup
+**Deliverable**: ✅ User clicks "Deploy NextCloud" → System automatically picks Server-02 → Shows "Recommended because 8GB RAM free" → One-click deploy
 
 ---
 
-### Phase 4: Polish & MVP Release (Weeks 11-14)
-🎯 **Goal**: Production-ready MVP for beta users
+### Phase 3: Database Pooling & Resource Optimization (Weeks 10-12)
+🎯 **Goal**: **Prove the value prop** - Show concrete RAM savings from resource sharing
+
+**Database Pooling (CORE FEATURE):**
+- [ ] **Shared Postgres service** - Deploy one instance per device
+  - Detect if Postgres already running
+  - Auto-deploy if needed (recipe-based)
+  - Health monitoring
+- [ ] **Database provisioning API**
+  - `CreateDatabase(appName)` creates new DB + user in shared instance
+  - Execute SQL via Docker exec
+  - Return connection credentials
+- [ ] **Recipe integration** - Apps request database instead of deploying own
+  - Recipe declares `requires_database: postgres`
+  - System provisions from shared instance
+  - Inject credentials into docker-compose template
+- [ ] **Resource savings dashboard**
+  - "You're saving 2.8GB RAM by sharing databases"
+  - Show: 5 apps sharing 1 Postgres vs 5 separate instances
+  - Visual: Before/after RAM usage comparison
+
+**Deliverable**: ✅ Deploy 3 apps (NextCloud, Monica, Paperless) → All share one Postgres instance → Show "Saved 2GB RAM"
+
+---
+
+### Phase 4: Cross-Device Migration & Polish (Weeks 13-16)
+🎯 **Goal**: Complete the multi-node story - apps can move between devices
+
+**Cross-Device Features:**
+- [ ] **App migration** - Move deployment from one device to another
+  - Export volumes/data from source device
+  - Transfer via SCP to destination
+  - Redeploy on destination with same config
+  - Health check and cutover
+- [ ] **Load rebalancing recommendations**
+  - Detect overloaded devices (>90% RAM)
+  - Suggest migrations: "Server-01 is full, migrate Vaultwarden to Pi-4?"
+  - One-click migration execution
+- [ ] **Reverse proxy automation** (moved from Phase 3)
+  - Traefik auto-deployment (simpler than NGINX Proxy Manager)
+  - Automatic routing rules
+  - SSL certificates (Let's Encrypt or self-signed)
 
 **Reliability**:
 - [ ] Comprehensive error handling throughout
@@ -1321,11 +1658,8 @@ This section tracks key architectural decisions made during development.
 - [ ] Graceful degradation (missing AdGuard, etc.)
 - [ ] User-facing error messages (no stack traces)
 
-**Backup & Config**:
-- [ ] Configuration export to JSON
-- [ ] Docker volume backup to local path
-- [ ] Backup scheduling (cron-like)
-- [ ] Restore from backup
+**Backup & Config** (moved to Phase 5):
+- [ ] See Phase 5 for comprehensive backup architecture
 
 **Security**:
 - [ ] OS keychain integration (99designs/keyring)
@@ -1352,6 +1686,75 @@ This section tracks key architectural decisions made during development.
 - [ ] Demo video (5 min walkthrough)
 
 **Deliverable**: ✅ Public beta on GitHub, ready for first 100 users
+
+---
+
+### Phase 5: Automated Encrypted Backups (Weeks 17-20)
+🎯 **Goal**: Data protection without manual backup scripts - automated, encrypted backups to S3 or local NAS
+
+**Backup Infrastructure:**
+- [ ] **BackupService with restic integration**
+  - Client-side AES-256 encryption
+  - Deduplication with content-defined chunking
+  - Repository management (init, check, unlock)
+- [ ] **Backup destinations**
+  - S3-compatible cloud storage (Backblaze B2, Wasabi, AWS S3, MinIO)
+  - Local NAS or server storage (NFS)
+  - Credentials encrypted with OS keychain
+- [ ] **Backup policies**
+  - Default policy: Daily at 2 AM, retain 7 daily, 4 weekly, 6 monthly
+  - Per-app custom policies (hourly for critical apps, weekly for media)
+  - Automatic retention enforcement (forget + prune)
+
+**Automated Operations:**
+- [ ] **Scheduled backups**
+  - Cron-based scheduler checks every minute
+  - Execute due backups in background
+  - Track backup status per app
+- [ ] **Backup scope**
+  - Docker volumes (app data)
+  - Docker Compose files (app configs)
+  - Platform database (deployments, devices)
+  - Shared database pools (PostgreSQL, MySQL)
+
+**Restore Operations:**
+- [ ] **Snapshot browsing**
+  - List all snapshots for app or system
+  - Show snapshot metadata (size, files changed, duration)
+  - Filter by date range or app
+- [ ] **One-click restore**
+  - Full app state restore
+  - Selective file restore
+  - Restore to different device
+
+**Dashboard Integration:**
+- [ ] **Backup settings page**
+  - Add/manage backup destinations
+  - Create/edit backup policies
+  - Test S3 connectivity
+- [ ] **Per-app backup tab**
+  - Enable/disable backups
+  - Choose backup policy
+  - View backup history
+  - Trigger immediate backup
+  - Browse and restore snapshots
+- [ ] **Backup monitoring**
+  - Dashboard widget: "Last backup: 2 hours ago"
+  - Storage usage tracking
+  - Show deduplication savings: "Saved 85% storage costs"
+  - Backup health alerts (failed backups, low storage)
+
+**Technical Implementation:**
+- [ ] Database models: BackupDestination, BackupPolicy, BackupConfiguration, BackupSnapshot
+- [ ] restic wrapper service with environment management
+- [ ] Repository password encryption (OS keychain)
+- [ ] Multi-destination redundancy (backup to both cloud AND local)
+- [ ] Bandwidth limiting for large backups
+- [ ] Pre/post backup hooks (database dumps)
+
+**See [docs/backup-architecture.md](backup-architecture.md) for complete technical specification**
+
+**Deliverable**: ✅ Configure Backblaze B2 destination → Default policy applies to all apps → Daily encrypted backups → Browse snapshots → One-click restore → Dashboard shows "85% storage savings from deduplication"
 
 ---
 

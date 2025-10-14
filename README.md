@@ -1,35 +1,51 @@
 # Homelab Orchestration Platform
 
-A centralized dashboard for managing your homelab without the headache.
+Unified multi-node orchestration for homelab infrastructure. Manages distributed systems (Raspberry Pis, servers, NAS) as a single cohesive platform.
 
-> **Note:** This is a personal project I'm building as I set up my own homelab. It's in early development and things will change as I figure out what works. Contributions and feedback are welcome!
+## Overview
 
-## What is this?
+Multi-device homelab orchestration with intelligent resource management and automated deployment.
 
-Managing a homelab shouldn't require a PhD in DevOps. This project aims to make self-hosting as simple as signing up for a SaaS product - automatically discover devices on your network, get opinionated recommendations for what to run where, and deploy apps without diving into config files.
+**Key capabilities:**
+1. Automatic device analysis (RAM, storage, CPU)
+2. Intelligent placement decisions
+3. Resource sharing (shared database instances, auto-provisioning)
+4. Zero-configuration deployment
 
-**Key ideas:**
-- **Auto-discovery**: Scan your network and detect servers, NAS devices, Raspberry Pis, etc.
-- **Smart recommendations**: Get app suggestions based on each device's available resources
-- **Opinionated setup**: Sensible defaults that just work, with escape hatches when you need them
-- **App marketplace**: Browse and deploy open-source apps with one click
-- **Centralized view**: See your entire homelab at a glance
-- **Encrypted backups**: Backup to cloud providers or local network storage
-- **Low barrier to entry**: You shouldn't need to be a sysadmin to host your own services
+**Differentiators:**
+- Multi-node orchestration (unified resource management)
+- Intelligent placement (automatic device selection)
+- Resource sharing (database pooling, shared caching)
+- Infrastructure-aware monitoring (aggregate metrics across devices)
+- Zero-configuration deployment
 
-The philosophy is simple: hide complexity, don't remove it. Everything should be reversible, and you should always have an escape hatch to the underlying tools if you need them.
+**Features:**
+- Unified dashboard (aggregate resources across devices)
+- Smart deployment (automatic device selection)
+- Database pooling (single shared instance, 60% RAM savings)
+- Cross-device monitoring
+- App marketplace (20+ curated recipes)
 
-## How is this different from Coolify/Portainer/etc?
+## Technical Architecture
 
-This isn't trying to replace those tools. Instead, it's focused on the broader homelab experience:
+**Design:**
 
-- **Multi-device orchestration**: Most tools focus on a single server. This is built for managing multiple devices at once (your main server, that old laptop, a couple of Raspberry Pis, etc.)
-- **Discovery-first**: Automatically find what's on your network instead of manually adding everything
-- **Resource-aware**: Smart recommendations about which device should run what based on available CPU/RAM/storage
-- **Homelab-specific features**: Built-in encrypted backups, network-wide monitoring, and other features that matter when you're running your own infrastructure
-- **Opinionated by default**: Less "here are 50 config options" and more "this will just work, but you can change it if you want"
+- Agentless (SSH and Docker API)
+- Intelligent scheduler (resource scoring algorithm)
+- Database pooling (shared instances with auto-provisioning)
+- Single binary (Go backend, embedded React frontend)
+- Multi-network aware (VLAN/subnet support)
+- Recipe-based (docker-compose.yaml + manifest.yaml)
 
-Think of it as the layer above your deployment tools - helping you figure out what to run where, keeping everything backed up, and giving you a single pane of glass for your entire setup.
+**Status:**
+- ✅ Device discovery and management
+- ✅ Recipe-based marketplace (20+ apps)
+- ✅ Single-device deployment
+- 🚧 Intelligent resource scoring
+- 🚧 Shared database infrastructure
+- 🚧 Cross-device resource aggregation
+
+Documentation: [docs/architecture.md](docs/architecture.md), [docs/mvp-vision.md](docs/mvp-vision.md)
 
 ## Quick Start
 
@@ -42,39 +58,28 @@ Think of it as the layer above your deployment tools - helping you figure out wh
 ### Development
 
 ```bash
-# Clone the repository
 git clone https://github.com/jaredcannon/homelab-orchestration-platform
 cd homelab-orchestration-platform
-
-# Install dependencies
 make install-deps
-
-# Run development servers
 make dev
 ```
 
-This starts:
-- Backend API at http://localhost:8080
-- Frontend at http://localhost:5173
+Services:
+- Backend API: http://localhost:8080
+- Frontend: http://localhost:5173
 
 ### Testing
 
 ```bash
-# Run backend tests
-make test
-
-# Run backend tests only
-make backend-test
+make test              # All tests
+make backend-test      # Backend only
 ```
 
 ### Building
 
 ```bash
-# Build single binary with embedded frontend
-make build
-
-# Run the binary
-./bin/homelab
+make build            # Single binary with embedded frontend
+./bin/homelab         # Run
 ```
 
 ## Project Structure
@@ -106,9 +111,9 @@ make install-deps      # Install all dependencies
 
 ## Current Status
 
-The foundation is in place - you can spin up the dev environment and start poking around. Core features like device scanning, the app marketplace, and backup management are being actively developed.
+Development environment functional. Core features in active development: device scanning, app marketplace, backup management.
 
-Check [docs/architecture.md](docs/architecture.md) for more technical details on how things are structured.
+Reference: [docs/architecture.md](docs/architecture.md)
 
 ## Tech Stack
 
@@ -122,7 +127,7 @@ Check [docs/architecture.md](docs/architecture.md) for more technical details on
 
 ## Contributing
 
-This is a personal project that's being actively developed, but I'm open to contributions! If you want to help out or have ideas, feel free to open an issue or PR. Just keep in mind that things are still pretty fluid as I nail down the exact direction.
+Contributions welcome. Open issues or PRs for bugs, features, or improvements.
 
 ## License
 

@@ -1,31 +1,24 @@
-# Authentication Documentation
+# Authentication
 
 ## Overview
 
-The Homelab Orchestration Platform includes a complete authentication system with JWT-based token authentication, secure password hashing with bcrypt, and a modern frontend auth flow.
+JWT-based authentication system with bcrypt password hashing and frontend session management.
 
 ## Features
 
-- ✅ **JWT Token Authentication** - Stateless authentication with 24-hour token expiry
-- ✅ **Secure Password Storage** - Bcrypt hashing with cost factor 12
-- ✅ **First-Run Setup** - Automatic admin account creation on first launch
-- ✅ **Role-Based Access** - Admin and regular user roles
-- ✅ **Protected Routes** - Automatic redirection for unauthenticated users
-- ✅ **Cross-Tab Sync** - Logout in one tab logs out all tabs
-- ✅ **Token Persistence** - Automatic session restoration on page reload
+- JWT token authentication (24-hour expiry)
+- Bcrypt password hashing (cost factor 12)
+- First-run admin account creation
+- Role-based access control
+- Protected routes with automatic redirect
+- Cross-tab synchronization
+- Session persistence
 
-## Setup Instructions
+## Setup
 
-### 1. Backend Configuration
+### Backend Configuration
 
-Create a `.env` file in the `backend/` directory (use `.env.example` as template):
-
-```bash
-# Copy the example file
-cp backend/.env.example backend/.env
-```
-
-Edit `backend/.env`:
+Create `.env` in `backend/` directory:
 
 ```env
 # Enable authentication (REQUIRED for production)
@@ -44,103 +37,87 @@ DB_PATH=./homelab.db
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
 ```
 
-### 2. Generate Secure JWT Secret
+### Generate JWT Secret
 
-For production, generate a secure random JWT secret:
+Production requires secure random JWT secret (minimum 32 characters):
 
 ```bash
-# On macOS/Linux
 openssl rand -base64 32
-
-# Or use a password generator
-# Minimum 32 characters recommended
 ```
 
-### 3. Start the Server
+### Start Server
 
 ```bash
-# From project root
 make dev
-
-# Or manually
-cd backend
-go run cmd/server/main.go
+# or
+cd backend && go run cmd/server/main.go
 ```
 
 ## Authentication Flow
 
 ### First-Run Setup
 
-1. **Visit the application** - Navigate to `http://localhost:5173`
-2. **Automatic redirect** - If not authenticated, redirected to `/login`
-3. **Setup link** - Click "Create admin account" to go to `/setup`
-4. **Create admin** - Enter username and password (first user becomes admin)
-5. **Automatic login** - After setup, automatically logged in and redirected to app
+1. Navigate to application
+2. Automatic redirect to `/login` if unauthenticated
+3. Click "Create admin account" → `/setup`
+4. Enter username and password (first user = admin)
+5. Automatic login and redirect
 
-### Subsequent Logins
+### Login
 
-1. **Visit `/login`** - Enter username and password
-2. **Token issued** - JWT token issued and stored in localStorage
-3. **Redirect** - Automatically redirected to the devices page
-4. **Session persistence** - Token validated on page reload
+1. Navigate to `/login`
+2. Enter credentials
+3. JWT token issued and stored in localStorage
+4. Redirect to devices page
+5. Token validated on page reload
 
 ### Logout
 
-- Click "Logout" button in top navigation bar
+- Logout button in navigation
 - Token removed from localStorage
-- Redirected to login page
-- Cross-tab logout (all tabs logged out simultaneously)
+- Redirect to login page
+- Cross-tab synchronization
 
 ## API Endpoints
 
-### Public Endpoints (No Authentication Required)
+### Public Endpoints
 
 - `POST /api/v1/auth/register` - Create first admin user
-- `POST /api/v1/auth/login` - Login and receive JWT token
+- `POST /api/v1/auth/login` - Login, receive JWT token
 
-### Protected Endpoints (Authentication Required)
+### Protected Endpoints
 
-- `GET /api/v1/auth/me` - Get current user information
-- `POST /api/v1/auth/change-password` - Change user password
-- `GET /api/v1/devices` - List all devices
-- `POST /api/v1/devices` - Create new device
-- ... (all device/scanner endpoints)
+- `GET /api/v1/auth/me` - Current user information
+- `POST /api/v1/auth/change-password` - Change password
+- `GET /api/v1/devices` - List devices
+- `POST /api/v1/devices` - Create device
+- All device/scanner endpoints
 
 ## Frontend Implementation
 
-### Auth Store (Zustand)
-
-Global state management for authentication:
+### Auth Store
 
 ```typescript
 import { useAuthStore } from './stores/authStore'
 
-// In a component
 const { user, token, isAuthenticated, isLoading } = useAuthStore()
 ```
 
 ### Auth Hooks
 
-Convenient React hooks for auth operations:
-
 ```typescript
 import { useLogin, useLogout, useRegister, useCurrentUser } from './hooks/useAuth'
 
-// Login
 const loginMutation = useLogin()
 loginMutation.mutate({ username: 'admin', password: 'password' })
 
-// Logout
 const logout = useLogout()
 logout()
 
-// Get current user
 const { user, isAuthenticated } = useCurrentUser()
 ```
 
 ### Protected Routes
-
-Wrap routes that require authentication:
 
 ```typescript
 import { ProtectedRoute } from './components/ProtectedRoute'
@@ -157,165 +134,114 @@ import { ProtectedRoute } from './components/ProtectedRoute'
 
 ## Security Best Practices
 
-### Production Deployment
+### Production
 
-1. **Enable Authentication**
-   ```env
-   REQUIRE_AUTH=true
-   ```
+Requirements:
 
-2. **Strong JWT Secret**
-   - Minimum 32 characters
-   - Generated from secure random source
-   - Never commit to version control
-
-3. **HTTPS Only**
-   - Always use HTTPS in production
-   - HTTP is insecure for authentication
-
-4. **CORS Configuration**
-   ```env
-   # Only allow your frontend domain
-   ALLOWED_ORIGINS=https://homelab.example.com
-   ```
-
-5. **Secure Password Requirements**
-   - Minimum 8 characters (enforced by backend)
-   - Consider enforcing complexity requirements
-   - Use strong passwords for admin accounts
+1. Enable authentication: `REQUIRE_AUTH=true`
+2. Strong JWT secret (minimum 32 characters, secure random)
+3. HTTPS only
+4. CORS configuration: `ALLOWED_ORIGINS=https://homelab.example.com`
+5. Strong passwords (minimum 8 characters enforced)
 
 ### Development
 
-For development, you can disable authentication:
+Optional: Disable authentication with `REQUIRE_AUTH=false`
 
-```env
-REQUIRE_AUTH=false
-```
-
-**⚠️ WARNING**: Never disable authentication in production!
+**WARNING**: Never disable in production.
 
 ## Token Management
 
-### Token Expiry
+### Expiry
 
-- Tokens expire after 24 hours
-- Users must re-login after expiry
-- No automatic token refresh (by design)
+- 24-hour token lifetime
+- Re-login required after expiry
+- No automatic refresh
 
-### Token Storage
+### Storage
 
-- Stored in localStorage with key `homelab_auth_token`
-- Automatically injected in API requests via axios interceptor
+- localStorage key: `homelab_auth_token`
+- Automatic injection via axios interceptor
 - Cleared on logout
 
-### Token Validation
+### Validation
 
 - Validated on every API request
-- Invalid tokens return 401 Unauthorized
-- Frontend automatically logs out on 401
+- Invalid tokens return 401
+- Automatic logout on 401
 
 ## User Management
 
 ### Admin Users
 
-- First user is automatically admin
-- Admins have full access to all features
-- Can manage other users (future feature)
+- First user automatically becomes admin
+- Full access to all features
+- User management (planned)
 
 ### Regular Users
 
-- Created by admins (future feature)
-- Limited permissions (future feature)
-- Can access own devices and applications
+- Admin creation (planned)
+- Limited permissions (planned)
+- Device/application access control (planned)
 
 ## Troubleshooting
 
-### "Authentication middleware DISABLED" Warning
+### Authentication middleware DISABLED
 
-**Problem**: Server logs show auth is disabled
+Set `REQUIRE_AUTH=true` in `.env`
 
-**Solution**: Set `REQUIRE_AUTH=true` in `.env` file
+### Invalid or expired token
 
-### "Invalid or expired token" Error
+Causes:
+1. Token expired (>24 hours)
+2. JWT_SECRET changed
+3. Invalid token format
 
-**Problem**: Token validation fails
-
-**Possible causes**:
-1. Token expired (>24 hours old) - Re-login
-2. JWT_SECRET changed - Clear localStorage and re-login
-3. Invalid token format - Clear localStorage and re-login
-
-**Solution**:
+Solution:
 ```javascript
-// Open browser console
 localStorage.removeItem('homelab_auth_token')
-// Then reload page and login again
+// Reload and re-login
 ```
 
-### "Username already exists" on Setup
+### Username already exists
 
-**Problem**: Trying to create admin when users exist
+Navigate to `/login` instead of `/setup`
 
-**Solution**: Navigate to `/login` instead of `/setup`
+### CORS errors
 
-### CORS Errors
-
-**Problem**: Frontend can't connect to backend
-
-**Solution**: Add frontend URL to `ALLOWED_ORIGINS`:
+Add frontend URL to `ALLOWED_ORIGINS`:
 ```env
 ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.100:5173
 ```
 
 ## Testing
 
-### Test the Auth Flow
+### Auth Flow
 
-1. **Clean database** (optional, for testing):
-   ```bash
-   rm backend/homelab.db
-   ```
-
-2. **Start servers**:
-   ```bash
-   make dev
-   ```
-
-3. **Test setup** - Visit `http://localhost:5173/setup`
+1. Clean database (optional): `rm backend/homelab.db`
+2. Start servers: `make dev`
+3. Test setup: Visit `http://localhost:5173/setup`
    - Create admin account
-   - Verify redirect to devices page
-   - Check top nav shows username
-
-4. **Test logout**:
-   - Click logout button
-   - Verify redirect to login
-   - Verify can't access `/` without auth
-
-5. **Test login**:
-   - Enter credentials on login page
    - Verify redirect to devices
-   - Verify token persists on reload
-
-6. **Test protected routes**:
-   - Logout
-   - Try to access `http://localhost:5173/`
-   - Verify automatic redirect to `/login`
+   - Check navigation shows username
+4. Test logout: Click logout → redirect to login → unauthenticated access blocked
+5. Test login: Enter credentials → redirect to devices → token persists on reload
+6. Test protected routes: Logout → access `/` → verify redirect to `/login`
 
 ## Future Enhancements
 
-- [ ] Refresh tokens for long-lived sessions
-- [ ] Password reset via email
-- [ ] Two-factor authentication (2FA)
-- [ ] OAuth integration (Google, GitHub)
-- [ ] User management UI for admins
-- [ ] Role-based permissions system
-- [ ] API rate limiting
-- [ ] Audit logging for auth events
+- Refresh tokens
+- Password reset
+- Two-factor authentication
+- OAuth integration
+- User management UI
+- Role-based permissions
+- API rate limiting
+- Audit logging
 
 ## Support
 
-For issues or questions about authentication:
-1. Check this documentation
-2. Review `/backend/internal/middleware/auth.go`
-3. Review `/frontend/src/hooks/useAuth.ts`
-4. Open an issue on GitHub
+Reference:
+- `/backend/internal/middleware/auth.go`
+- `/frontend/src/hooks/useAuth.ts`
+- GitHub issues
