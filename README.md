@@ -45,7 +45,7 @@ Multi-device homelab orchestration with intelligent resource management and auto
 - 🚧 Shared database infrastructure
 - 🚧 Cross-device resource aggregation
 
-Documentation: [docs/architecture.md](docs/architecture.md), [docs/mvp-vision.md](docs/mvp-vision.md)
+Documentation: [docs/architecture.md](docs/architecture.md), [docs/vision-and-roadmap.md](docs/vision-and-roadmap.md)
 
 ## Quick Start
 
@@ -93,7 +93,14 @@ homelab-orchestration-platform/
 ├── frontend/          # React + TypeScript + Vite
 │   └── src/          # Frontend source code
 ├── docs/             # Documentation
-│   └── architecture.md
+│   ├── architecture.md
+│   ├── vision-and-roadmap.md
+│   ├── app-system.md
+│   ├── intelligent-orchestration.md
+│   ├── backup-architecture.md
+│   ├── infrastructure-management.md
+│   └── firewall-integration.md
+├── AUTHENTICATION.md  # Authentication setup guide
 ├── Makefile          # Build commands
 └── Procfile          # Development server config
 ```

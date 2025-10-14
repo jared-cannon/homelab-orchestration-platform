@@ -179,7 +179,7 @@ Reference: [architecture.md](architecture.md), [intelligent-orchestration.md](in
 
 ## Roadmap
 
-## Phase 2: Intelligent Deployment UX (Q1 2026)
+## Phase 2: Intelligent Deployment UX
 
 **Goal:** Surface multi-node intelligence through UI
 
@@ -254,7 +254,7 @@ Saved 2.8GB RAM by sharing databases
 
 ---
 
-## Phase 3: Database Pooling & Resource Optimization (Q2 2026)
+## Phase 3: Database Pooling & Resource Optimization
 
 **Goal:** Prove 60% RAM savings value proposition
 
@@ -322,7 +322,7 @@ Apps using shared Postgres on Server-02:
 
 ---
 
-## Phase 4: Advanced Multi-Device Features (Q3 2026)
+## Phase 4: Advanced Multi-Device Features
 
 ### One-Click App Migration
 
@@ -400,7 +400,7 @@ networking:
 
 ---
 
-## Phase 5: Intelligence & Automation (Q4 2026)
+## Phase 5: Intelligence & Automation
 
 ### Automated Load Balancing
 
@@ -436,7 +436,7 @@ networking:
 
 ---
 
-## Phase 6: Community & Ecosystem (2027+)
+## Phase 6: Community & Ecosystem
 
 ### Device Templates
 
