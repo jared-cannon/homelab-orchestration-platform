@@ -26,13 +26,14 @@ const (
 
 // DeploymentService handles deployment operations
 type DeploymentService struct {
-	db            *gorm.DB
-	sshClient     *ssh.Client
-	recipeLoader  *RecipeLoader
-	deviceService *DeviceService
-	wsHub         WSHub
-	deviceLocks   sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
-	cancelFuncs   sync.Map // Map of deployment ID -> context.CancelFunc for cancellation
+	db              *gorm.DB
+	sshClient       *ssh.Client
+	recipeLoader    *RecipeLoader
+	deviceService   *DeviceService
+	wsHub           WSHub
+	firewallService *FirewallService
+	deviceLocks     sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
+	cancelFuncs     sync.Map // Map of deployment ID -> context.CancelFunc for cancellation
 }
 
 // WSHub interface for WebSocket broadcasting
@@ -49,11 +50,12 @@ func NewDeploymentService(
 	wsHub WSHub,
 ) *DeploymentService {
 	return &DeploymentService{
-		db:            db,
-		sshClient:     sshClient,
-		recipeLoader:  recipeLoader,
-		deviceService: deviceService,
-		wsHub:         wsHub,
+		db:              db,
+		sshClient:       sshClient,
+		recipeLoader:    recipeLoader,
+		deviceService:   deviceService,
+		wsHub:           wsHub,
+		firewallService: NewFirewallService(sshClient),
 	}
 }
 
@@ -173,13 +175,17 @@ func (s *DeploymentService) DeleteDeployment(id string) error {
 		return fmt.Errorf("failed to get device: %w", err)
 	}
 
+	// Extract ports from deployment before stopping
+	portsToClose := ExtractPortsFromCompose(deployment.GeneratedCompose)
+
 	// Stop and remove containers
 	if deployment.ComposeProject != "" {
 		host := fmt.Sprintf("%s:22", device.IPAddress)
+		deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 		// Stop and remove the compose project (WITHOUT removing volumes to preserve data)
 		// Users should manually delete volumes if they want to remove data
-		stopCmd := fmt.Sprintf("docker compose -p %s down", deployment.ComposeProject)
+		stopCmd := fmt.Sprintf("cd %s && docker compose -p %s down", deployDir, deployment.ComposeProject)
 		output, err := s.sshClient.ExecuteWithTimeout(host, stopCmd, 2*time.Minute)
 		if err != nil {
 			return fmt.Errorf("failed to stop deployment: %w (output: %s)", err, output)
@@ -188,12 +194,52 @@ func (s *DeploymentService) DeleteDeployment(id string) error {
 		log.Printf("[Deployment] Stopped %s (volumes preserved)", deployment.ComposeProject)
 	}
 
+	// Clean up firewall ports (only if no other deployments are using them)
+	if len(portsToClose) > 0 {
+		if err := s.cleanupFirewallPorts(device, deployment.ID, portsToClose); err != nil {
+			// Log warning but don't fail deletion if port cleanup fails
+			log.Printf("[Deployment] Warning: Failed to cleanup firewall ports for %s: %v", deployment.ID, err)
+		}
+	}
+
 	// Delete from database
 	if err := s.db.Delete(deployment).Error; err != nil {
 		return fmt.Errorf("failed to delete deployment record: %w", err)
 	}
 
 	return nil
+}
+
+// BulkDeleteDeployments deletes all deployments with a specific status
+func (s *DeploymentService) BulkDeleteDeployments(status models.DeploymentStatus) (int, error) {
+	// Query all deployments with the specified status
+	var deployments []models.Deployment
+	if err := s.db.Where("status = ?", status).Find(&deployments).Error; err != nil {
+		return 0, fmt.Errorf("failed to query deployments: %w", err)
+	}
+
+	deletedCount := 0
+	var errors []string
+
+	// Delete each deployment
+	for _, deployment := range deployments {
+		if err := s.DeleteDeployment(deployment.ID.String()); err != nil {
+			// Log error but continue with other deletions
+			log.Printf("[Deployment] Failed to delete deployment %s: %v", deployment.ID, err)
+			errors = append(errors, fmt.Sprintf("%s: %v", deployment.RecipeName, err))
+		} else {
+			deletedCount++
+		}
+	}
+
+	// If some deletions failed, return error with details
+	if len(errors) > 0 {
+		return deletedCount, fmt.Errorf("deleted %d/%d deployments, errors: %s",
+			deletedCount, len(deployments), strings.Join(errors, "; "))
+	}
+
+	log.Printf("[Deployment] Bulk deleted %d deployments with status: %s", deletedCount, status)
+	return deletedCount, nil
 }
 
 // CancelDeployment cancels a running or pending deployment
@@ -232,6 +278,172 @@ func (s *DeploymentService) CancelDeployment(id string) error {
 	}
 
 	return nil
+}
+
+// RestartDeployment restarts a running deployment without recreating containers
+func (s *DeploymentService) RestartDeployment(id string) error {
+	deployment, err := s.GetDeployment(id)
+	if err != nil {
+		return fmt.Errorf("deployment not found: %w", err)
+	}
+
+	// Check if deployment can be restarted
+	if deployment.Status != models.DeploymentStatusRunning && deployment.Status != models.DeploymentStatusStopped {
+		return fmt.Errorf("deployment cannot be restarted (current status: %s)", deployment.Status)
+	}
+
+	// Get device for SSH
+	device, err := s.deviceService.GetDevice(deployment.DeviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get device: %w", err)
+	}
+
+	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
+
+	// Use appropriate command based on current status
+	var restartCmd string
+	if deployment.Status == models.DeploymentStatusStopped {
+		// If stopped, use 'start' instead of 'restart'
+		restartCmd = fmt.Sprintf("cd %s && docker compose -p %s start", deployDir, deployment.ComposeProject)
+	} else {
+		// If running, use 'restart'
+		restartCmd = fmt.Sprintf("cd %s && docker compose -p %s restart", deployDir, deployment.ComposeProject)
+	}
+
+	output, err := s.sshClient.ExecuteWithTimeout(host, restartCmd, 2*time.Minute)
+	if err != nil {
+		return fmt.Errorf("failed to restart deployment: %w (output: %s)", err, output)
+	}
+
+	log.Printf("[Deployment] Restarted %s on %s", deployment.ComposeProject, device.Name)
+
+	// Update status to running
+	s.updateStatus(deployment, models.DeploymentStatusRunning, "")
+
+	return nil
+}
+
+// StopDeployment stops a running deployment without removing containers
+func (s *DeploymentService) StopDeployment(id string) error {
+	deployment, err := s.GetDeployment(id)
+	if err != nil {
+		return fmt.Errorf("deployment not found: %w", err)
+	}
+
+	// Check if deployment can be stopped
+	if deployment.Status != models.DeploymentStatusRunning {
+		return fmt.Errorf("deployment cannot be stopped (current status: %s)", deployment.Status)
+	}
+
+	// Get device for SSH
+	device, err := s.deviceService.GetDevice(deployment.DeviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get device: %w", err)
+	}
+
+	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
+
+	// Stop containers (keeps containers and volumes)
+	stopCmd := fmt.Sprintf("cd %s && docker compose -p %s stop", deployDir, deployment.ComposeProject)
+	output, err := s.sshClient.ExecuteWithTimeout(host, stopCmd, 2*time.Minute)
+	if err != nil {
+		return fmt.Errorf("failed to stop deployment: %w (output: %s)", err, output)
+	}
+
+	log.Printf("[Deployment] Stopped %s on %s", deployment.ComposeProject, device.Name)
+
+	// Update status to stopped
+	s.updateStatus(deployment, models.DeploymentStatusStopped, "")
+
+	return nil
+}
+
+// StartDeployment starts a stopped deployment
+func (s *DeploymentService) StartDeployment(id string) error {
+	deployment, err := s.GetDeployment(id)
+	if err != nil {
+		return fmt.Errorf("deployment not found: %w", err)
+	}
+
+	// Check if deployment can be started
+	if deployment.Status != models.DeploymentStatusStopped {
+		return fmt.Errorf("deployment cannot be started (current status: %s)", deployment.Status)
+	}
+
+	// Get device for SSH
+	device, err := s.deviceService.GetDevice(deployment.DeviceID)
+	if err != nil {
+		return fmt.Errorf("failed to get device: %w", err)
+	}
+
+	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
+
+	// Start containers
+	startCmd := fmt.Sprintf("cd %s && docker compose -p %s start", deployDir, deployment.ComposeProject)
+	output, err := s.sshClient.ExecuteWithTimeout(host, startCmd, 2*time.Minute)
+	if err != nil {
+		return fmt.Errorf("failed to start deployment: %w (output: %s)", err, output)
+	}
+
+	log.Printf("[Deployment] Started %s on %s", deployment.ComposeProject, device.Name)
+
+	// Update status to running
+	s.updateStatus(deployment, models.DeploymentStatusRunning, "")
+
+	return nil
+}
+
+// GetAccessURLs generates access URLs for a deployment based on exposed ports
+func (s *DeploymentService) GetAccessURLs(id string) ([]map[string]interface{}, error) {
+	deployment, err := s.GetDeployment(id)
+	if err != nil {
+		return nil, fmt.Errorf("deployment not found: %w", err)
+	}
+
+	// Get device for IP address
+	device, err := s.deviceService.GetDevice(deployment.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device: %w", err)
+	}
+
+	// Extract ports from compose
+	portSpecs := ExtractPortsFromCompose(deployment.GeneratedCompose)
+
+	urls := []map[string]interface{}{}
+	for _, spec := range portSpecs {
+		// Only generate HTTP URLs for TCP ports
+		if spec.Protocol == "tcp" {
+			// Determine protocol (http vs https)
+			protocol := "http"
+			if spec.Port == 443 || spec.Port == 8443 {
+				protocol = "https"
+			}
+
+			url := fmt.Sprintf("%s://%s:%d", protocol, device.IPAddress, spec.Port)
+
+			// Add description - only label ports we're absolutely certain about
+			// Recipe-specific port descriptions will be added in a future enhancement
+			description := fmt.Sprintf("Port %d", spec.Port)
+			switch spec.Port {
+			case 80:
+				description = "HTTP"
+			case 443:
+				description = "HTTPS"
+			}
+
+			urls = append(urls, map[string]interface{}{
+				"url":         url,
+				"port":        spec.Port,
+				"protocol":    protocol,
+				"description": description,
+			})
+		}
+	}
+
+	return urls, nil
 }
 
 // executeDeployment performs the actual deployment steps
@@ -294,6 +506,33 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	deployment.Config, _ = json.Marshal(sanitizedConfig)
 
 	s.db.Save(deployment)
+
+	// Extract ports from rendered compose
+	portsToOpen := ExtractPortsFromCompose(rendered)
+	if len(portsToOpen) > 0 {
+		// Format port list for logging
+		portList := formatPortSpecs(portsToOpen)
+		s.appendLog(deployment, fmt.Sprintf("Detected ports to expose: %s", portList))
+
+		// Check firewall status
+		s.appendLog(deployment, "Checking firewall configuration...")
+		firewallStatus, err := s.firewallService.CheckFirewall(device)
+		if err != nil {
+			s.appendLog(deployment, fmt.Sprintf("⚠️  Could not check firewall: %v", err))
+		} else if firewallStatus.Installed && firewallStatus.Enabled {
+			s.appendLog(deployment, fmt.Sprintf("Firewall detected: %s (active)", firewallStatus.Type))
+			s.appendLog(deployment, "Opening required ports on firewall...")
+
+			if err := s.firewallService.OpenPorts(device, portsToOpen); err != nil {
+				s.appendLog(deployment, fmt.Sprintf("⚠️  Warning: Failed to open firewall ports: %v", err))
+				s.appendLog(deployment, "You may need to manually open ports. See post-deployment instructions.")
+			} else {
+				s.appendLog(deployment, "✓ Firewall ports opened successfully")
+			}
+		} else {
+			s.appendLog(deployment, "ℹ️  No active firewall detected - ports should be accessible")
+		}
+	}
 
 	// Update status to deploying
 	s.updateStatus(deployment, models.DeploymentStatusDeploying, "")
@@ -597,9 +836,10 @@ func (s *DeploymentService) deployToDevice(device *models.Device, projectName, c
 // checkDeploymentHealth performs health check on the deployment
 func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deployment *models.Deployment, recipe *models.Recipe) error {
 	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Step 1: Check if containers are running
-	checkCmd := fmt.Sprintf("docker compose -p %s ps -q", deployment.ComposeProject)
+	checkCmd := fmt.Sprintf("cd %s && docker compose -p %s ps -q", deployDir, deployment.ComposeProject)
 	output, err := s.sshClient.ExecuteWithTimeout(host, checkCmd, 1*time.Minute)
 	if err != nil {
 		return fmt.Errorf("failed to check containers: %w", err)
@@ -611,7 +851,7 @@ func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deploym
 	}
 
 	// Step 2: Check container status
-	statusCmd := fmt.Sprintf("docker compose -p %s ps --format json", deployment.ComposeProject)
+	statusCmd := fmt.Sprintf("cd %s && docker compose -p %s ps --format json", deployDir, deployment.ComposeProject)
 	statusOutput, err := s.sshClient.ExecuteWithTimeout(host, statusCmd, 1*time.Minute)
 	if err == nil {
 		// Parse status output
@@ -673,11 +913,12 @@ func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deploym
 // cleanupFailedDeployment attempts to clean up a failed deployment
 func (s *DeploymentService) cleanupFailedDeployment(device *models.Device, projectName string) {
 	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 
 	log.Printf("[Deployment] Cleaning up failed deployment: %s", projectName)
 
 	// Try to stop and remove any containers that were created
-	cleanupCmd := fmt.Sprintf("docker compose -p %s down 2>/dev/null || true", projectName)
+	cleanupCmd := fmt.Sprintf("cd %s && docker compose -p %s down 2>/dev/null || true", deployDir, projectName)
 	output, err := s.sshClient.ExecuteWithTimeout(host, cleanupCmd, 2*time.Minute)
 	if err != nil {
 		log.Printf("[Deployment] Warning: cleanup may have failed for %s: %v (output: %s)", projectName, err, output)
@@ -686,7 +927,6 @@ func (s *DeploymentService) cleanupFailedDeployment(device *models.Device, proje
 	}
 
 	// Try to remove the deployment directory
-	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 	removeCmd := fmt.Sprintf("rm -rf %s 2>/dev/null || true", deployDir)
 	_, err = s.sshClient.ExecuteWithTimeout(host, removeCmd, 30*time.Second)
 	if err != nil {
@@ -775,6 +1015,148 @@ func (s *DeploymentService) validateRequiredFields(recipe *models.Recipe, config
 	}
 
 	log.Printf("[Deployment] All required fields validated for recipe: %s", recipe.Slug)
+	return nil
+}
+
+// TroubleshootDeployment provides detailed troubleshooting information for a deployment
+func (s *DeploymentService) TroubleshootDeployment(id string) (map[string]interface{}, error) {
+	// Get deployment
+	deployment, err := s.GetDeployment(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get device
+	device, err := s.deviceService.GetDevice(deployment.DeviceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get device: %w", err)
+	}
+
+	troubleshoot := make(map[string]interface{})
+	troubleshoot["deployment_id"] = deployment.ID
+	troubleshoot["deployment_status"] = deployment.Status
+	troubleshoot["device_name"] = device.Name
+	troubleshoot["device_ip"] = device.IPAddress
+
+	host := fmt.Sprintf("%s:22", device.IPAddress)
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
+
+	// Check container status
+	checkCmd := fmt.Sprintf("cd %s && docker compose -p %s ps --format json 2>/dev/null || cd %s && docker compose -p %s ps", deployDir, deployment.ComposeProject, deployDir, deployment.ComposeProject)
+	containerStatus, err := s.sshClient.ExecuteWithTimeout(host, checkCmd, 30*time.Second)
+	if err != nil {
+		troubleshoot["container_status"] = fmt.Sprintf("Error: %v", err)
+	} else {
+		troubleshoot["container_status"] = containerStatus
+	}
+
+	// Extract ports from compose
+	ports := ExtractPortsFromCompose(deployment.GeneratedCompose)
+	troubleshoot["required_ports"] = ports
+
+	// Get firewall status (structured data)
+	firewallStatus, err := s.firewallService.CheckFirewall(device)
+	if err != nil {
+		troubleshoot["firewall_status"] = map[string]interface{}{
+			"enabled": false,
+			"error":   err.Error(),
+		}
+	} else {
+		troubleshoot["firewall_status"] = map[string]interface{}{
+			"enabled":    firewallStatus.Enabled,
+			"type":       firewallStatus.Type,
+			"installed":  firewallStatus.Installed,
+			"open_ports": firewallStatus.OpenPorts,
+		}
+	}
+
+	// Get firewall troubleshooting recommendations (text)
+	firewallSteps, err := s.firewallService.GetFirewallTroubleshootingSteps(device, ports)
+	if err == nil {
+		troubleshoot["recommendations"] = []string{firewallSteps}
+	}
+
+	// Get container logs (last 50 lines)
+	logsCmd := fmt.Sprintf("cd %s && docker compose -p %s logs --tail=50", deployDir, deployment.ComposeProject)
+	containerLogs, err := s.sshClient.ExecuteWithTimeout(host, logsCmd, 30*time.Second)
+	if err != nil {
+		troubleshoot["recent_logs"] = fmt.Sprintf("Error: %v", err)
+	} else {
+		troubleshoot["recent_logs"] = containerLogs
+	}
+
+	// Check which ports are actually listening
+	listeningCmd := "ss -tuln | grep LISTEN"
+	listeningPorts, err := s.sshClient.ExecuteWithTimeout(host, listeningCmd, 10*time.Second)
+	if err == nil {
+		troubleshoot["listening_ports"] = listeningPorts
+	}
+
+	troubleshoot["generated_compose"] = deployment.GeneratedCompose
+	troubleshoot["deployment_logs"] = deployment.DeploymentLogs
+
+	return troubleshoot, nil
+}
+
+// formatPortSpecs formats a slice of PortSpec for logging
+func formatPortSpecs(portSpecs []PortSpec) string {
+	if len(portSpecs) == 0 {
+		return "none"
+	}
+
+	parts := make([]string, len(portSpecs))
+	for i, spec := range portSpecs {
+		parts[i] = fmt.Sprintf("%d/%s", spec.Port, spec.Protocol)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// cleanupFirewallPorts closes firewall ports that are no longer needed after deployment deletion
+// Only closes ports if no other deployments on the same device are using them
+func (s *DeploymentService) cleanupFirewallPorts(device *models.Device, deletedDeploymentID uuid.UUID, ports []PortSpec) error {
+	// Get all other deployments on this device
+	var otherDeployments []models.Deployment
+	if err := s.db.Where("device_id = ? AND id != ? AND status IN ?",
+		device.ID,
+		deletedDeploymentID,
+		[]models.DeploymentStatus{
+			models.DeploymentStatusRunning,
+			models.DeploymentStatusDeploying,
+			models.DeploymentStatusHealthCheck,
+		}).Find(&otherDeployments).Error; err != nil {
+		return fmt.Errorf("failed to query deployments: %w", err)
+	}
+
+	// Build map of ports in use by other deployments
+	portsInUse := make(map[string]bool) // key: "port/protocol"
+	for _, deployment := range otherDeployments {
+		otherPorts := ExtractPortsFromCompose(deployment.GeneratedCompose)
+		for _, spec := range otherPorts {
+			key := fmt.Sprintf("%d/%s", spec.Port, spec.Protocol)
+			portsInUse[key] = true
+		}
+	}
+
+	// Filter out ports that are still in use
+	portsToClose := []PortSpec{}
+	for _, spec := range ports {
+		key := fmt.Sprintf("%d/%s", spec.Port, spec.Protocol)
+		if !portsInUse[key] {
+			portsToClose = append(portsToClose, spec)
+		}
+	}
+
+	// Close unused ports
+	if len(portsToClose) > 0 {
+		log.Printf("[Deployment] Closing firewall ports no longer in use: %s", formatPortSpecs(portsToClose))
+		if err := s.firewallService.ClosePorts(device, portsToClose); err != nil {
+			return fmt.Errorf("failed to close ports: %w", err)
+		}
+		log.Printf("[Deployment] Successfully closed %d firewall port(s)", len(portsToClose))
+	} else {
+		log.Printf("[Deployment] All ports still in use by other deployments, skipping cleanup")
+	}
+
 	return nil
 }
 

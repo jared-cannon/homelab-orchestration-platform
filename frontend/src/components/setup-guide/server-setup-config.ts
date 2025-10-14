@@ -313,7 +313,7 @@ export const serverSetupGuide: GuideConfig = {
                   '• Username: [lowercase, no spaces]',
                   '• Password: [strong password]',
                 ]},
-                { type: 'text', text: '⚠️ Write these down - you will need them!', className: 'text-xs text-amber-600 dark:text-amber-400 mt-2' },
+                { type: 'text', text: '⚠️ Write these down - you will need them!', className: 'text-xs font-semibold mt-2' },
                 { type: 'text', text: 'Note: This password will be used for SSH login AND for sudo commands (administrator tasks)', className: 'text-xs text-muted-foreground mt-2 italic' },
               ],
             },
@@ -401,7 +401,7 @@ export const serverSetupGuide: GuideConfig = {
             {
               type: 'text',
               text: '✍️ Write this IP address down - you will need it!',
-              className: 'text-sm font-medium text-amber-600 dark:text-amber-400',
+              className: 'text-sm font-semibold',
             },
           ],
         },

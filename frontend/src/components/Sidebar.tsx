@@ -25,8 +25,8 @@ const navItems: NavItem[] = [
     icon: <Server className="w-5 h-5" />,
   },
   {
-    name: 'Deployments',
-    path: '/deployments',
+    name: 'Apps',
+    path: '/apps',
     icon: <Rocket className="w-5 h-5" />,
   },
   {

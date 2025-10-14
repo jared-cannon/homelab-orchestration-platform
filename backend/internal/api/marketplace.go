@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
@@ -29,6 +31,8 @@ func (h *MarketplaceHandler) RegisterRoutes(api fiber.Router) {
 	marketplace.Post("/recipes/:slug/validate", h.ValidateDeployment)
 	marketplace.Post("/recipes/:slug/recommend-device", h.RecommendDevice)
 	marketplace.Get("/categories", h.GetCategories)
+	marketplace.Post("/check-updates", h.CheckForUpdates)
+	marketplace.Post("/reload", h.ReloadRecipes)
 }
 
 // ListRecipes godoc
@@ -162,4 +166,50 @@ func (h *MarketplaceHandler) RecommendDevice(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(scores)
+}
+
+// CheckForUpdates godoc
+// @Summary Check for recipe updates
+// @Description Check all recipe sources for available updates
+// @Tags marketplace
+// @Produce json
+// @Success 200 {object} map[string][]string
+// @Failure 500 {object} ErrorResponse
+// @Router /marketplace/check-updates [post]
+func (h *MarketplaceHandler) CheckForUpdates(c *fiber.Ctx) error {
+	updates, err := h.marketplaceService.CheckForUpdates()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: "Failed to check for updates",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"updates": updates,
+		"message": "Update check completed",
+	})
+}
+
+// ReloadRecipes godoc
+// @Summary Reload recipes
+// @Description Reload all recipes from all sources
+// @Tags marketplace
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 500 {object} ErrorResponse
+// @Router /marketplace/reload [post]
+func (h *MarketplaceHandler) ReloadRecipes(c *fiber.Ctx) error {
+	if err := h.marketplaceService.ReloadRecipes(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to reload recipes: %v", err),
+		})
+	}
+
+	// Get updated recipe count
+	recipes, _ := h.marketplaceService.ListRecipes("")
+
+	return c.JSON(fiber.Map{
+		"message": "Recipes reloaded successfully",
+		"count":   len(recipes),
+	})
 }

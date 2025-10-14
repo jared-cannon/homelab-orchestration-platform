@@ -26,9 +26,15 @@ func (h *DeploymentHandler) RegisterRoutes(router fiber.Router) {
 	deployments := router.Group("/deployments")
 	deployments.Get("", h.ListDeployments)
 	deployments.Post("", h.CreateDeployment)
+	deployments.Delete("/cleanup", h.CleanupDeployments)
 	deployments.Get("/:id", h.GetDeployment)
 	deployments.Delete("/:id", h.DeleteDeployment)
 	deployments.Post("/:id/cancel", h.CancelDeployment)
+	deployments.Post("/:id/restart", h.RestartDeployment)
+	deployments.Post("/:id/stop", h.StopDeployment)
+	deployments.Post("/:id/start", h.StartDeployment)
+	deployments.Get("/:id/urls", h.GetAccessURLs)
+	deployments.Get("/:id/troubleshoot", h.TroubleshootDeployment)
 }
 
 // CreateDeployment creates a new deployment
@@ -120,4 +126,91 @@ func (h *DeploymentHandler) CancelDeployment(c *fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// RestartDeployment restarts a deployment
+func (h *DeploymentHandler) RestartDeployment(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	if err := h.deploymentService.RestartDeployment(id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to restart deployment: %v", err),
+		})
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// StopDeployment stops a deployment
+func (h *DeploymentHandler) StopDeployment(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	if err := h.deploymentService.StopDeployment(id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to stop deployment: %v", err),
+		})
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// StartDeployment starts a stopped deployment
+func (h *DeploymentHandler) StartDeployment(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	if err := h.deploymentService.StartDeployment(id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to start deployment: %v", err),
+		})
+	}
+
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// GetAccessURLs returns access URLs for a deployment
+func (h *DeploymentHandler) GetAccessURLs(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	urls, err := h.deploymentService.GetAccessURLs(id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to get access URLs: %v", err),
+		})
+	}
+
+	return c.JSON(urls)
+}
+
+// TroubleshootDeployment provides troubleshooting information for a deployment
+func (h *DeploymentHandler) TroubleshootDeployment(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	troubleshoot, err := h.deploymentService.TroubleshootDeployment(id)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to troubleshoot deployment: %v", err),
+		})
+	}
+
+	return c.JSON(troubleshoot)
+}
+
+// CleanupDeployments bulk deletes deployments by status
+func (h *DeploymentHandler) CleanupDeployments(c *fiber.Ctx) error {
+	// Parse status query parameter (defaults to "failed")
+	status := c.Query("status", "failed")
+	deploymentStatus := models.DeploymentStatus(status)
+
+	// Call service to delete deployments
+	count, err := h.deploymentService.BulkDeleteDeployments(deploymentStatus)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to cleanup deployments: %v", err),
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"deleted_count": count,
+		"status":        status,
+	})
 }

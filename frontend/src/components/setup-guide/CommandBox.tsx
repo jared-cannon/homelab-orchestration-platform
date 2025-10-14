@@ -24,22 +24,22 @@ export function CommandBox({
   return (
     <div className={cn('space-y-2', className)}>
       <div
-        className="flex items-center justify-between gap-2 bg-muted px-3 py-2 rounded"
+        className="flex items-center justify-between gap-3 bg-muted/30 border border-border/50 px-4 py-3 rounded-lg"
         role="region"
         aria-label={`Command: ${label}`}
       >
-        <code className="font-mono text-xs sm:text-sm flex-1">{command}</code>
+        <code className="font-mono text-xs sm:text-sm flex-1 text-foreground">{command}</code>
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 w-8 p-0 flex-shrink-0"
+          className="h-8 w-8 p-0 flex-shrink-0 hover:bg-background"
           onClick={handleCopy}
           aria-label={`Copy ${label} to clipboard`}
         >
           <Copy className="w-4 h-4" aria-hidden="true" />
         </Button>
       </div>
-      {description && <p className="text-sm text-muted-foreground">{description}</p>}
+      {description && <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>}
     </div>
   )
 }

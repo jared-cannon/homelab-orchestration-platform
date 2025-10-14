@@ -1,7 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"fmt"
+	"strings"
+	"text/template"
 
 	"github.com/google/uuid"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
@@ -10,19 +13,21 @@ import (
 
 // MarketplaceService handles marketplace operations
 type MarketplaceService struct {
-	db            *gorm.DB
-	recipeLoader  *RecipeLoader
-	deviceService *DeviceService
-	validator     *ValidatorService
+	db                *gorm.DB
+	recipeLoader      *RecipeLoader
+	deviceService     *DeviceService
+	validator         *ValidatorService
+	resourceValidator *ResourceValidator
 }
 
 // NewMarketplaceService creates a new marketplace service
-func NewMarketplaceService(db *gorm.DB, recipeLoader *RecipeLoader, deviceService *DeviceService, validator *ValidatorService) *MarketplaceService {
+func NewMarketplaceService(db *gorm.DB, recipeLoader *RecipeLoader, deviceService *DeviceService, validator *ValidatorService, resourceValidator *ResourceValidator) *MarketplaceService {
 	return &MarketplaceService{
-		db:            db,
-		recipeLoader:  recipeLoader,
-		deviceService: deviceService,
-		validator:     validator,
+		db:                db,
+		recipeLoader:      recipeLoader,
+		deviceService:     deviceService,
+		validator:         validator,
+		resourceValidator: resourceValidator,
 	}
 }
 
@@ -121,27 +126,83 @@ func (s *MarketplaceService) ValidateDeployment(recipeSlug string, deviceID uuid
 		}
 	}
 
-	// TODO: Implement actual RAM and storage checking
-	result.ResourceCheck = &ResourceCheck{
-		RequiredRAMMB:      recipe.Resources.MinRAMMB,
-		RequiredStorageGB:  recipe.Resources.MinStorageGB,
-		DockerInstalled:    dockerInstalled,
-		DockerRunning:      dockerRunning,
-		RAMSufficient:      true, // TODO: Check actual RAM
-		StorageSufficient:  true, // TODO: Check actual storage
-		AvailableRAMMB:     4096, // Placeholder
-		AvailableStorageGB: 100,  // Placeholder
+	// Extract required ports from config
+	requiredPorts := ExtractPortsFromConfig(config)
+
+	// Validate resources using ResourceValidator
+	resourceValidation, err := s.resourceValidator.ValidateResourceRequirements(
+		device,
+		recipe.Resources.MinRAMMB,
+		recipe.Resources.MinStorageGB,
+		recipe.Resources.CPUCores,
+		requiredPorts,
+	)
+
+	if err != nil {
+		// If resource checking fails, log warning but don't fail validation
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Could not verify resources: %v", err))
+
+		// Use conservative defaults
+		result.ResourceCheck = &ResourceCheck{
+			RequiredRAMMB:      recipe.Resources.MinRAMMB,
+			RequiredStorageGB:  recipe.Resources.MinStorageGB,
+			DockerInstalled:    dockerInstalled,
+			DockerRunning:      dockerRunning,
+			RAMSufficient:      true,
+			StorageSufficient:  true,
+			AvailableRAMMB:     0,
+			AvailableStorageGB: 0,
+		}
+	} else {
+		// Use actual resource check results
+		result.ResourceCheck = &ResourceCheck{
+			RequiredRAMMB:      recipe.Resources.MinRAMMB,
+			AvailableRAMMB:     resourceValidation.DeviceResources.AvailableRAMMB,
+			RAMSufficient:      resourceValidation.RAMSufficient,
+			RequiredStorageGB:  recipe.Resources.MinStorageGB,
+			AvailableStorageGB: resourceValidation.DeviceResources.AvailableStorageGB,
+			StorageSufficient:  resourceValidation.StorageSufficient,
+			DockerInstalled:    dockerInstalled,
+			DockerRunning:      dockerRunning,
+		}
+
+		// Add validation errors if resources insufficient
+		if !resourceValidation.RAMSufficient {
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"Insufficient RAM: need %d MB, only %d MB available",
+				recipe.Resources.MinRAMMB,
+				resourceValidation.DeviceResources.AvailableRAMMB,
+			))
+		}
+
+		if !resourceValidation.StorageSufficient {
+			result.Valid = false
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"Insufficient storage: need %d GB, only %d GB available",
+				recipe.Resources.MinStorageGB,
+				resourceValidation.DeviceResources.AvailableStorageGB,
+			))
+		}
+
+		if !resourceValidation.PortsAvailable {
+			result.Valid = false
+			result.PortConflicts = resourceValidation.PortConflicts
+			result.Errors = append(result.Errors, fmt.Sprintf(
+				"Port conflicts detected: ports %v are already in use",
+				resourceValidation.PortConflicts,
+			))
+		}
 	}
 
-	// Check for port conflicts
-	// TODO: Implement port conflict detection
-	if internalPort, ok := config["internal_port"].(int); ok {
-		_ = internalPort // TODO: Check if port is already in use
+	// Render compose template to validate and preview
+	renderedCompose, err := s.renderComposePreview(recipe, config, device)
+	if err != nil {
+		result.Valid = false
+		result.Errors = append(result.Errors, fmt.Sprintf("Template rendering failed: %v", err))
+	} else {
+		result.RenderedCompose = renderedCompose
 	}
-
-	// Render compose template to validate
-	// TODO: Implement template rendering
-	// result.RenderedCompose = renderedTemplate
 
 	return result, nil
 }
@@ -166,4 +227,53 @@ func (s *MarketplaceService) GetCategories() []string {
 // ReloadRecipes reloads all recipes from disk (useful for development)
 func (s *MarketplaceService) ReloadRecipes() error {
 	return s.recipeLoader.Reload()
+}
+
+// renderComposePreview renders the Docker Compose template for preview/validation
+func (s *MarketplaceService) renderComposePreview(recipe *models.Recipe, config map[string]interface{}, device *models.Device) (string, error) {
+	// Import deployment service's template rendering logic
+	// We'll use a simplified version here for preview
+
+	// Normalize config keys: Convert snake_case to PascalCase for Go templates
+	normalizedConfig := make(map[string]interface{})
+	for key, value := range config {
+		// Convert snake_case to PascalCase
+		pascalKey := snakeToPascalCase(key)
+		normalizedConfig[pascalKey] = value
+		// Also keep original key for backwards compatibility
+		normalizedConfig[key] = value
+	}
+
+	// Add preview-specific variables
+	normalizedConfig["DEPLOYMENT_ID"] = "preview"
+	normalizedConfig["COMPOSE_PROJECT"] = "preview-" + recipe.Slug
+
+	// Parse and execute template
+	tmpl, err := template.New("compose").Parse(recipe.ComposeTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, normalizedConfig); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// snakeToPascalCase converts snake_case to PascalCase
+func snakeToPascalCase(input string) string {
+	parts := strings.Split(input, "_")
+	for i, part := range parts {
+		if len(part) > 0 {
+			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+// CheckForUpdates checks all recipe sources for available updates
+func (s *MarketplaceService) CheckForUpdates() (map[string][]string, error) {
+	return s.recipeLoader.CheckForUpdates()
 }

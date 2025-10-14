@@ -335,6 +335,69 @@ export function useCancelDeployment() {
   })
 }
 
+export function useRestartDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.restartDeployment(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
+export function useStopDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.stopDeployment(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
+export function useStartDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => apiClient.startDeployment(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.detail(id) })
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
+export function useDeploymentAccessURLs(id: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...deploymentKeys.detail(id), 'urls'],
+    queryFn: () => apiClient.getDeploymentAccessURLs(id),
+    enabled: !!id && (options?.enabled !== false),
+  })
+}
+
+export function useTroubleshootDeployment(id: string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...deploymentKeys.detail(id), 'troubleshoot'],
+    queryFn: () => apiClient.troubleshootDeployment(id),
+    enabled: !!id && (options?.enabled !== false),
+  })
+}
+
+export function useCleanupDeployments() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (status: string = 'failed') => apiClient.cleanupDeployments(status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deploymentKeys.lists() })
+    },
+  })
+}
+
 // Software Installation query keys
 export const softwareInstallationKeys = {
   all: ['software-installations'] as const,

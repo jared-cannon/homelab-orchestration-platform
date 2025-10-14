@@ -1000,9 +1000,9 @@ function DeploymentsTab({ deviceId }: { deviceId: string }) {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => navigate('/deployments')}
+                onClick={() => navigate('/apps')}
                 className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-                title="View all deployments"
+                title="View all apps"
               >
                 <Rocket className="w-4 h-4" />
               </button>
@@ -1020,10 +1020,10 @@ function DeploymentsTab({ deviceId }: { deviceId: string }) {
       ))}
       <div className="pt-2">
         <button
-          onClick={() => navigate('/deployments')}
+          onClick={() => navigate('/apps')}
           className="w-full text-center text-sm text-primary hover:underline"
         >
-          View all deployments →
+          View all apps →
         </button>
       </div>
     </div>

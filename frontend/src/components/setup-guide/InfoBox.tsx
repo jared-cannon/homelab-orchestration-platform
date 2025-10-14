@@ -22,31 +22,31 @@ const variantConfig: Record<
 > = {
   warning: {
     icon: AlertTriangle,
-    containerClass: 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800',
-    iconClass: 'text-amber-600 dark:text-amber-400',
-    titleClass: 'text-amber-950 dark:text-amber-50',
-    contentClass: 'text-amber-900 dark:text-amber-100',
+    containerClass: 'bg-amber-500/5 dark:bg-amber-400/5 border-amber-200/40 dark:border-amber-400/20',
+    iconClass: 'text-amber-600 dark:text-amber-500',
+    titleClass: 'text-foreground',
+    contentClass: 'text-muted-foreground',
   },
   info: {
     icon: Info,
-    containerClass: 'bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800',
-    iconClass: 'text-blue-600 dark:text-blue-400',
-    titleClass: 'text-blue-950 dark:text-blue-50',
-    contentClass: 'text-blue-900 dark:text-blue-100',
+    containerClass: 'bg-primary/5 dark:bg-primary/5 border-primary/20 dark:border-primary/20',
+    iconClass: 'text-primary dark:text-primary',
+    titleClass: 'text-foreground',
+    contentClass: 'text-muted-foreground',
   },
   success: {
     icon: CheckCircle2,
-    containerClass: 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800',
-    iconClass: 'text-emerald-600 dark:text-emerald-400',
-    titleClass: 'text-emerald-950 dark:text-emerald-50',
-    contentClass: 'text-emerald-900 dark:text-emerald-100',
+    containerClass: 'bg-emerald-500/5 dark:bg-emerald-400/5 border-emerald-200/40 dark:border-emerald-400/20',
+    iconClass: 'text-emerald-600 dark:text-emerald-500',
+    titleClass: 'text-foreground',
+    contentClass: 'text-muted-foreground',
   },
   tip: {
     icon: Info,
-    containerClass: 'bg-violet-50 dark:bg-violet-950/50 border-violet-200 dark:border-violet-800',
-    iconClass: 'text-violet-600 dark:text-violet-400',
-    titleClass: 'text-violet-950 dark:text-violet-50',
-    contentClass: 'text-violet-900 dark:text-violet-100',
+    containerClass: 'bg-violet-500/5 dark:bg-violet-400/5 border-violet-200/40 dark:border-violet-400/20',
+    iconClass: 'text-violet-600 dark:text-violet-500',
+    titleClass: 'text-foreground',
+    contentClass: 'text-muted-foreground',
   },
 }
 
@@ -55,11 +55,11 @@ export function InfoBox({ variant, title, children, className }: InfoBoxProps) {
   const Icon = config.icon
 
   return (
-    <div className={cn('border rounded-lg p-3 flex gap-2', config.containerClass, className)}>
-      <Icon className={cn('w-4 h-4 flex-shrink-0 mt-0.5', config.iconClass)} />
-      <div className="flex-1 space-y-1">
-        {title && <p className={cn('text-sm font-medium', config.titleClass)}>{title}</p>}
-        <div className={cn('text-sm', config.contentClass)}>{children}</div>
+    <div className={cn('border rounded-lg p-4 flex gap-3', config.containerClass, className)}>
+      <Icon className={cn('w-5 h-5 flex-shrink-0 mt-0.5', config.iconClass)} />
+      <div className="flex-1 space-y-2">
+        {title && <p className={cn('text-sm font-semibold', config.titleClass)}>{title}</p>}
+        <div className={cn('text-sm leading-relaxed', config.contentClass)}>{children}</div>
       </div>
     </div>
   )

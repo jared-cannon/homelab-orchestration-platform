@@ -112,7 +112,8 @@ func main() {
 		recipes := recipeLoader.ListRecipes()
 		log.Printf("🏪 Marketplace initialized with %d recipes", len(recipes))
 	}
-	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator)
+	resourceValidator := services.NewResourceValidator(sshClient)
+	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator, resourceValidator)
 	deviceScorer := services.NewDeviceScorer(db, sshClient)
 
 	// Initialize deployment service

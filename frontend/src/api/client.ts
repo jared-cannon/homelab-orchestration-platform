@@ -393,6 +393,43 @@ class APIClient {
       method: 'POST',
     })
   }
+
+  async restartDeployment(id: string): Promise<void> {
+    return this.request<void>(`/deployments/${id}/restart`, {
+      method: 'POST',
+    })
+  }
+
+  async stopDeployment(id: string): Promise<void> {
+    return this.request<void>(`/deployments/${id}/stop`, {
+      method: 'POST',
+    })
+  }
+
+  async startDeployment(id: string): Promise<void> {
+    return this.request<void>(`/deployments/${id}/start`, {
+      method: 'POST',
+    })
+  }
+
+  async getDeploymentAccessURLs(id: string): Promise<Array<{
+    url: string
+    port: number
+    protocol: string
+    description: string
+  }>> {
+    return this.request(`/deployments/${id}/urls`)
+  }
+
+  async troubleshootDeployment(id: string): Promise<any> {
+    return this.request(`/deployments/${id}/troubleshoot`)
+  }
+
+  async cleanupDeployments(status: string = 'failed'): Promise<{ deleted_count: number; status: string }> {
+    return this.request(`/deployments/cleanup?status=${encodeURIComponent(status)}`, {
+      method: 'DELETE',
+    })
+  }
 }
 
 export const apiClient = new APIClient()

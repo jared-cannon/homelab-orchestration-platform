@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // Recipe represents a marketplace application recipe loaded from YAML
 type Recipe struct {
 	ID                     string               `yaml:"id" json:"id"`
@@ -14,6 +16,23 @@ type Recipe struct {
 	ConfigOptions          []RecipeConfigOption `yaml:"config_options" json:"config_options"`
 	PostDeployInstructions string               `yaml:"post_deploy_instructions" json:"post_deploy_instructions"`
 	HealthCheck            RecipeHealthCheck    `yaml:"health_check" json:"health_check"`
+
+	// Metadata (not in YAML, populated by recipe sources)
+	Metadata RecipeMetadata `yaml:"-" json:"metadata"`
+}
+
+// RecipeMetadata contains metadata about the recipe source and versioning
+type RecipeMetadata struct {
+	Source        string     `json:"source"`         // "local", "coolify", "portainer", etc.
+	Version       string     `json:"version"`        // Recipe version
+	LastUpdated   time.Time  `json:"last_updated"`   // When recipe was last updated
+	UpdatedAt     time.Time  `json:"updated_at"`     // When we last fetched it
+	SourceURL     string     `json:"source_url"`     // URL to source repository
+	ImageVersion  string     `json:"image_version"`  // Latest Docker image version
+	QualityScore  int        `json:"quality_score"`  // 0-100 quality score
+	Verified      bool       `json:"verified"`       // Is this a verified/official recipe
+	DeployCount   int        `json:"deploy_count"`   // How many times deployed (local tracking)
+	SuccessRate   float64    `json:"success_rate"`   // Deployment success rate (0-1)
 }
 
 // RecipeResources defines the resource requirements for a recipe

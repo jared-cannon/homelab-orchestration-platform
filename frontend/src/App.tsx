@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { DevicesPage } from './pages/Devices'
 import { DeviceDetailPage } from './pages/DeviceDetail'
-import { DeploymentsPage } from './pages/Deployments'
+import { AppsPage } from './pages/Apps'
 import { MarketplacePage } from './pages/Marketplace'
 import { RecipeDetailPage } from './pages/RecipeDetail'
 import { LoginPage } from './pages/Login'
@@ -41,11 +41,11 @@ function AppContent() {
         }
       />
       <Route
-        path="/deployments"
+        path="/apps"
         element={
           <ProtectedRoute>
             <AuthLayout>
-              <DeploymentsPage />
+              <AppsPage />
             </AuthLayout>
           </ProtectedRoute>
         }

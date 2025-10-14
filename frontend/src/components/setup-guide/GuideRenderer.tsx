@@ -42,7 +42,7 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
     switch (item.type) {
       case 'text':
         return (
-          <p key={index} className={item.className || 'text-sm text-muted-foreground'}>
+          <p key={index} className={item.className || 'text-sm text-muted-foreground leading-relaxed'}>
             {item.text}
           </p>
         )
@@ -82,7 +82,7 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
             key={index}
             className={
               item.className ||
-              `space-y-1 ${item.ordered ? 'ml-4 list-decimal' : ''} text-sm text-muted-foreground`
+              `space-y-2 ${item.ordered ? 'ml-4 list-decimal' : ''} text-sm text-muted-foreground leading-relaxed`
             }
           >
             {item.items.map((listItem, i) => (
@@ -101,11 +101,11 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
         }[item.columns] || 'grid-cols-2'
 
         return (
-          <div key={index} className={`grid ${gridColsClass} gap-4 text-sm`}>
+          <div key={index} className={`grid ${gridColsClass} gap-6 text-sm`}>
             {item.items.map((gridItem, i) => (
               <div key={i}>
-                {gridItem.title && <p className="font-medium mb-2">{gridItem.title}</p>}
-                <ul className="space-y-1 text-muted-foreground">
+                {gridItem.title && <p className="font-semibold mb-2">{gridItem.title}</p>}
+                <ul className="space-y-1.5 text-muted-foreground leading-relaxed">
                   {gridItem.content.map((line, j) => (
                     <li key={j}>{line}</li>
                   ))}
@@ -135,13 +135,13 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
 
       case 'stepList':
         return (
-          <ol key={index} className="space-y-3 text-sm">
+          <ol key={index} className="space-y-4 text-sm">
             {item.items.map((step, i) => (
               <li key={i} className="flex gap-3">
-                <span className="font-semibold text-primary">{step.label}</span>
-                <div className="flex-1">
+                <span className="font-bold text-primary flex-shrink-0">{step.label}</span>
+                <div className="flex-1 leading-relaxed">
                   {typeof step.content === 'string' ? (
-                    <span>{step.content}</span>
+                    <span className="text-muted-foreground">{step.content}</span>
                   ) : (
                     renderContent(step.content)
                   )}
@@ -155,11 +155,11 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
         // Handle special custom components
         if (item.component === 'loginTerminal') {
           return (
-            <div key={index} className="bg-background border rounded p-3 font-mono text-sm space-y-2">
-              <div className="text-muted-foreground">[your-server-name] login: _</div>
-              <p className="text-xs text-muted-foreground">Type your username and press Enter (use the username you created during installation)</p>
-              <div className="text-muted-foreground">Password: _</div>
-              <p className="text-xs text-muted-foreground">
+            <div key={index} className="bg-muted/20 border border-border/50 rounded-lg p-4 font-mono text-sm space-y-3">
+              <div className="text-foreground">[your-server-name] login: _</div>
+              <p className="text-xs text-muted-foreground leading-relaxed">Type your username and press Enter (use the username you created during installation)</p>
+              <div className="text-foreground">Password: _</div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
                 Type your password (won\'t show as you type - this is normal for security)
               </p>
             </div>
@@ -167,7 +167,7 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
         }
         if (item.component === 'sshPrompt') {
           return (
-            <div key={index} className="bg-background border rounded p-2 font-mono text-xs">
+            <div key={index} className="bg-muted/20 border border-border/50 rounded-lg p-3 font-mono text-xs text-muted-foreground leading-relaxed">
               The authenticity of host... can\'t be established.
               <br />
               Are you sure you want to continue? (yes/no)
@@ -176,12 +176,12 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
         }
         if (item.component === 'rufusConfig') {
           return (
-            <div key={index} className="bg-background border rounded p-3 space-y-1 font-mono text-xs">
-              <div>Device: [Your USB drive]</div>
-              <div>Boot selection: [Click SELECT, choose Ubuntu ISO]</div>
-              <div>Partition scheme: GPT</div>
-              <div>Target system: UEFI</div>
-              <div>File system: FAT32</div>
+            <div key={index} className="bg-muted/20 border border-border/50 rounded-lg p-4 space-y-2 font-mono text-xs">
+              <div className="text-foreground">Device: [Your USB drive]</div>
+              <div className="text-foreground">Boot selection: [Click SELECT, choose Ubuntu ISO]</div>
+              <div className="text-foreground">Partition scheme: GPT</div>
+              <div className="text-foreground">Target system: UEFI</div>
+              <div className="text-foreground">File system: FAT32</div>
             </div>
           )
         }
@@ -193,17 +193,17 @@ function renderContent(items: ContentItem[] | string): React.ReactNode {
             return null
           }
           return (
-            <div key={index} className="space-y-3 text-sm">
+            <div key={index} className="space-y-4 text-sm">
               {props.rows.map((row, i) => (
-                <div key={i} className="flex gap-3 pb-2 border-b last:border-0">
-                  <span className="font-semibold min-w-[120px]">{row.label}</span>
+                <div key={i} className="flex gap-4 pb-3 border-b border-border/50 last:border-0">
+                  <span className="font-semibold min-w-[120px] flex-shrink-0">{row.label}</span>
                   {typeof row.value === 'string' ? (
-                    <span className="text-muted-foreground">{row.value}</span>
+                    <span className="text-muted-foreground leading-relaxed">{row.value}</span>
                   ) : (
                     <div className="flex-1">
-                      <p className="text-muted-foreground mb-1">{row.value.text}</p>
+                      <p className="text-muted-foreground mb-1.5 leading-relaxed">{row.value.text}</p>
                       {row.value.note && (
-                        <p className="text-xs text-muted-foreground">{row.value.note}</p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">{row.value.note}</p>
                       )}
                     </div>
                   )}
@@ -248,7 +248,7 @@ interface GuideRendererProps {
 
 export function GuideRenderer({ config }: GuideRendererProps) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {config.warningMessage && (
         <InfoBox variant={config.warningMessage.variant} title={config.warningMessage.title}>
           {renderContent(config.warningMessage.content)}
@@ -256,44 +256,44 @@ export function GuideRenderer({ config }: GuideRendererProps) {
       )}
 
       {/* Guide Overview */}
-      <div className="bg-muted/50 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+      <div className="bg-muted/30 rounded-lg p-5 border border-border/50">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
             Guide Overview
           </p>
           <p className="text-xs text-muted-foreground">
             {config.phases.length} phases total
           </p>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-2">
           {config.phases.map((phase, index) => (
             <div
               key={phase.id}
-              className="flex-1 h-1.5 rounded-full bg-primary/20"
+              className="flex-1 h-2 rounded-full bg-primary/15"
               title={phase.title}
               aria-label={`Phase ${index + 1}: ${phase.title}`}
             />
           ))}
         </div>
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
           Expand each phase below and follow the steps in order
         </p>
       </div>
 
-      <Accordion type="multiple" className="space-y-2">
+      <Accordion type="multiple" className="space-y-3">
         {config.phases.map(renderPhase)}
       </Accordion>
 
       {config.conclusion && (
-        <div className="bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/20 rounded-lg p-6 space-y-3">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-primary" />
+        <div className="bg-gradient-to-br from-primary/5 to-primary/10 border border-primary/20 rounded-lg p-6 space-y-4 mt-8">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-6 h-6 text-primary" />
             <h3 className="font-semibold text-lg">{config.conclusion.title}</h3>
           </div>
-          <p className="text-sm text-muted-foreground">{config.conclusion.description}</p>
-          <div className="bg-background/50 rounded p-3 space-y-1 text-sm">
-            <p className="font-medium">What you'll need:</p>
-            <ul className="text-muted-foreground space-y-0.5 ml-4">
+          <p className="text-sm text-muted-foreground leading-relaxed">{config.conclusion.description}</p>
+          <div className="bg-background/50 rounded-lg p-4 space-y-2 text-sm border border-primary/10">
+            <p className="font-semibold">What you'll need:</p>
+            <ul className="text-muted-foreground space-y-1.5 ml-4 leading-relaxed">
               {config.conclusion.checklist.map((item, i) => (
                 <li key={i}>• {item}</li>
               ))}
