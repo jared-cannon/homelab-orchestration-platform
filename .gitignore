@@ -51,3 +51,5 @@ tmp/
 temp/
 *.tmp
 backend/recipe-cache
+backend/cmd/server/server
+backend/server
