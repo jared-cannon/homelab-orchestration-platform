@@ -823,6 +823,259 @@ Volume{
 
 ---
 
+## Tailscale Integration
+
+### Overview
+
+Tailscale provides mesh VPN connectivity for secure cross-device communication. Integration enables:
+
+- Cross-VLAN orchestration without firewall configuration
+- Secure remote access to devices
+- Simplified network topology for multi-site deployments
+- Automatic device discovery via Tailscale DNS
+
+### Prerequisites
+
+- Device must be Ubuntu 24.04 or compatible Linux distribution
+- SSH user must have sudo access
+- Tailscale account with authentication key
+- Network allows UDP traffic (port 41641)
+
+### Installation Steps
+
+```bash
+# 1. Add Tailscale repository
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list | sudo tee /etc/apt/sources.list.d/tailscale.list
+
+# 2. Install Tailscale package
+sudo apt-get update
+sudo apt-get install -y tailscale
+
+# 3. Verify installation
+tailscale version
+```
+
+### Device Authentication
+
+**Interactive Authentication:**
+```bash
+sudo tailscale up
+# Opens browser for authentication
+```
+
+**Automated Authentication (recommended for orchestration):**
+```bash
+# Using pre-authorized key from Tailscale admin console
+sudo tailscale up --authkey tskey-auth-xxxxx --advertise-tags=tag:homelab
+```
+
+**Ephemeral Nodes (for temporary devices):**
+```bash
+sudo tailscale up --authkey tskey-auth-xxxxx --ephemeral
+```
+
+### Tag Configuration
+
+Tags control ACL policies and device grouping in Tailscale.
+
+**Common Tags:**
+- `tag:homelab` - All homelab devices
+- `tag:server` - Server devices
+- `tag:client` - Client devices
+- `tag:nas` - Storage devices
+
+**Apply Tags During Setup:**
+```bash
+sudo tailscale up --authkey tskey-auth-xxxxx --advertise-tags=tag:homelab,tag:server
+```
+
+**Update Tags on Running Device:**
+```bash
+sudo tailscale set --advertise-tags=tag:homelab,tag:nas
+```
+
+### State Tracking
+
+```go
+type TailscaleConfig struct {
+    ID            uuid.UUID `gorm:"type:uuid;primaryKey"`
+    DeviceID      uuid.UUID `gorm:"type:uuid;not null;index"`
+    Device        Device    `gorm:"foreignKey:DeviceID"`
+    Enabled       bool      `gorm:"default:true"`
+    TailscaleIP   string    `json:"tailscale_ip"`   // 100.x.x.x address
+    Hostname      string    `json:"hostname"`
+    Tags          string    `json:"tags"`           // Comma-separated
+    ExitNode      bool      `gorm:"default:false"`
+    SubnetRouter  bool      `gorm:"default:false"`
+    AdvertiseRoute string   `json:"advertise_route,omitempty"` // e.g., "192.168.1.0/24"
+    InstalledAt   time.Time `json:"installed_at"`
+    CreatedAt     time.Time
+    UpdatedAt     time.Time
+}
+```
+
+### API Endpoints
+
+**Install Tailscale:**
+```
+POST /api/v1/devices/:id/tailscale/install
+
+Request:
+{
+  "authkey": "tskey-auth-xxxxx",
+  "tags": ["homelab", "server"],
+  "ephemeral": false
+}
+
+Response:
+{
+  "success": true,
+  "message": "Tailscale installed and authenticated",
+  "config": {
+    "tailscale_ip": "100.64.0.5",
+    "hostname": "server-01",
+    "tags": "tag:homelab,tag:server"
+  }
+}
+```
+
+**Get Status:**
+```
+GET /api/v1/devices/:id/tailscale/status
+
+Response:
+{
+  "enabled": true,
+  "tailscale_ip": "100.64.0.5",
+  "hostname": "server-01",
+  "connected": true,
+  "exit_node": false
+}
+```
+
+**Update Configuration:**
+```
+PATCH /api/v1/devices/:id/tailscale/config
+
+Request:
+{
+  "tags": ["homelab", "nas"],
+  "exit_node": true
+}
+```
+
+### Frontend UX
+
+**Device Setup Wizard Integration:**
+
+During device onboarding, offer optional Tailscale setup:
+
+```
+┌───────────────────────────────────────────────────┐
+│ Enable Tailscale (Optional)                       │
+├───────────────────────────────────────────────────┤
+│                                                    │
+│ Connect this device to your Tailscale network     │
+│ for secure remote access and cross-VLAN support.  │
+│                                                    │
+│ Authentication Key:                                │
+│ [tskey-auth-___________________________]          │
+│                                                    │
+│ Tags (optional):                                   │
+│ [homelab, server_____________________]            │
+│                                                    │
+│ [Skip]  [Setup Tailscale]                         │
+└───────────────────────────────────────────────────┘
+```
+
+**Device Detail Page:**
+
+Show Tailscale status in device overview:
+
+```
+┌─────────────────────────────────────────────────┐
+│ Network Information                              │
+├─────────────────────────────────────────────────┤
+│ Local IP:      192.168.1.100                    │
+│ Tailscale IP:  100.64.0.5 [Connected]           │
+│ Hostname:      server-01.tail-xxxxx.ts.net      │
+│ Tags:          homelab, server                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Use Cases
+
+**Cross-VLAN Orchestration:**
+
+Manage devices across multiple VLANs without complex firewall rules:
+
+```
+Control Plane (VLAN 10): 192.168.10.5 / 100.64.0.1
+Device A (VLAN 20):      192.168.20.10 / 100.64.0.5
+Device B (VLAN 30):      192.168.30.15 / 100.64.0.6
+
+Orchestration uses Tailscale IPs for communication
+```
+
+**Remote Access:**
+
+Access homelab from anywhere without port forwarding:
+
+```
+ssh user@100.64.0.5
+# OR
+ssh server-01.tail-xxxxx.ts.net
+```
+
+**Multi-Site Deployment:**
+
+Orchestrate devices across physical locations:
+
+```
+Site A (Home):   Devices 1-3 (100.64.0.1-3)
+Site B (Office): Devices 4-6 (100.64.0.4-6)
+
+Single control plane manages all devices via Tailscale mesh
+```
+
+### Security Considerations
+
+**Authentication Keys:**
+- Store auth keys encrypted in OS keychain
+- Use ephemeral keys for temporary devices
+- Rotate keys periodically
+
+**ACL Policies:**
+- Define policies in Tailscale admin console
+- Use tags to control access between devices
+- Example: Only `tag:homelab` devices can access each other
+
+**Network Isolation:**
+- Tailscale traffic is encrypted end-to-end
+- Uses WireGuard protocol
+- No need for additional VPN tunnels
+
+### Troubleshooting
+
+**Problem:** "tailscale: command not found"
+- **Cause:** Package not installed or not in PATH
+- **Fix:** Verify installation: `which tailscale`
+
+**Problem:** "Authentication failed"
+- **Cause:** Invalid or expired auth key
+- **Fix:** Generate new key from Tailscale admin console
+
+**Problem:** "Unable to connect to coordination server"
+- **Cause:** Firewall blocking UDP port 41641
+- **Fix:** Allow UDP traffic: `sudo ufw allow 41641/udp`
+
+**Problem:** "Device not appearing in Tailscale admin"
+- **Cause:** Authentication not completed
+- **Fix:** Check status: `sudo tailscale status`
+
+---
+
 ## API Reference
 
 ### Software Management
