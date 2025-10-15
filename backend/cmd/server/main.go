@@ -132,6 +132,7 @@ func main() {
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
 	healthCheckService.SetDeviceService(deviceService)
+	healthCheckService.SetWebSocketHub(wsHub)
 
 	// Initialize resource monitoring service
 	resourceMonitoring := services.NewResourceMonitoringService(db, sshClient, deviceService, credService, &services.ResourceMonitoringConfig{

@@ -1,4 +1,4 @@
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import { ResourceBar } from './ui/resource-bar'
 
 interface DeviceResourceMetricsProps {
@@ -9,6 +9,7 @@ interface DeviceResourceMetricsProps {
   totalStorageGB?: number
   usedStorageGB?: number
   resourcesUpdatedAt?: string
+  isChecking?: boolean
   className?: string
 }
 
@@ -50,8 +51,35 @@ export function DeviceResourceMetrics({
   totalStorageGB,
   usedStorageGB,
   resourcesUpdatedAt,
+  isChecking,
   className
 }: DeviceResourceMetricsProps) {
+  // Show loading skeleton when checking
+  if (isChecking) {
+    return (
+      <div className={className}>
+        <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Performing initial health check...</span>
+        </div>
+        <div className="space-y-3">
+          {/* Skeleton loaders */}
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <div className="h-3 w-12 bg-muted/50 rounded animate-pulse" />
+                <div className="h-3 w-16 bg-muted/50 rounded animate-pulse" />
+              </div>
+              <div className="h-2 w-full bg-muted/30 rounded-full overflow-hidden">
+                <div className="h-full bg-muted/50 rounded-full animate-pulse" style={{ width: '40%' }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   // Check if we have any resource data
   const hasData = cpuUsagePercent !== undefined || totalRamMB !== undefined || totalStorageGB !== undefined
 

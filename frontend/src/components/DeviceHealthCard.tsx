@@ -62,7 +62,7 @@ function getStatusText(status: DeviceStatus): string {
       return 'Error'
     case DeviceStatusUnknown:
     default:
-      return 'Unknown'
+      return 'Checking...'
   }
 }
 
@@ -137,7 +137,7 @@ export function DeviceHealthCard({ device }: DeviceHealthCardProps) {
 
             <div className="flex items-center gap-2">
               <StatusBadge variant={getStatusVariant(device.status)}>
-                <Activity className="w-3 h-3" />
+                <Activity className={`w-3 h-3 ${device.status === DeviceStatusUnknown ? 'animate-pulse' : ''}`} />
                 {getStatusText(device.status)}
               </StatusBadge>
 
@@ -216,6 +216,15 @@ export function DeviceHealthCard({ device }: DeviceHealthCardProps) {
               totalStorageGB={device.total_storage_gb}
               usedStorageGB={device.used_storage_gb}
               resourcesUpdatedAt={device.resources_updated_at}
+            />
+          </div>
+        )}
+
+        {/* Loading state for unknown status */}
+        {device.status === DeviceStatusUnknown && (
+          <div className="px-6 pt-4 pb-4 mt-4 border-t border-border/50">
+            <DeviceResourceMetrics
+              isChecking={true}
             />
           </div>
         )}

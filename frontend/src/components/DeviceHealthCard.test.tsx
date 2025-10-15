@@ -49,10 +49,17 @@ describe('DeviceHealthCard', () => {
     expect(screen.getByText('Error')).toBeInTheDocument()
   })
 
-  it('shows unknown status', () => {
+  it('shows checking status for unknown devices', () => {
     render(<DeviceHealthCard device={{ ...baseDevice, status: DeviceStatusUnknown }} />)
 
-    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.getByText('Checking...')).toBeInTheDocument()
+  })
+
+  it('shows loading skeleton for unknown devices', () => {
+    render(<DeviceHealthCard device={{ ...baseDevice, status: DeviceStatusUnknown }} />)
+
+    // Should show loading message
+    expect(screen.getByText(/Performing initial health check/i)).toBeInTheDocument()
   })
 
   it('displays last seen as "Never" when not set', () => {
