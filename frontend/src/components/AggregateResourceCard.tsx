@@ -9,6 +9,7 @@ interface AggregateResourceCardProps {
   unit: string
   percentage: number
   cores?: number
+  deviceCount?: number
   className?: string
 }
 
@@ -40,10 +41,24 @@ export function AggregateResourceCard({
   unit,
   percentage,
   cores,
+  deviceCount,
   className
 }: AggregateResourceCardProps) {
   const config = typeConfig[type]
   const Icon = config.icon
+
+  // Format numbers based on unit
+  const formatValue = (value: number): string => {
+    // For GB, show 1 decimal place for values < 10, none for >= 10
+    if (unit === 'GB') {
+      if (value < 10) {
+        return value.toFixed(1)
+      }
+      return Math.round(value).toLocaleString()
+    }
+    // For other units, use toLocaleString for comma separation
+    return value.toLocaleString()
+  }
 
   // Determine status color based on percentage
   const getStatusClass = () => {
@@ -96,12 +111,25 @@ export function AggregateResourceCard({
 
       {/* Usage details */}
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">
-          {used.toLocaleString()}{unit} used
-        </span>
-        <span className="text-muted-foreground">
-          {total.toLocaleString()}{unit} total
-        </span>
+        {type === 'cpu' ? (
+          <>
+            <span className="text-muted-foreground">
+              {/* Empty for visual balance */}
+            </span>
+            <span className="text-muted-foreground">
+              {deviceCount ? `${deviceCount} ${deviceCount === 1 ? 'device' : 'devices'}` : ''}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="text-muted-foreground">
+              {formatValue(used)}{unit} used
+            </span>
+            <span className="text-muted-foreground">
+              {formatValue(total)}{unit} total
+            </span>
+          </>
+        )}
       </div>
     </Card>
   )

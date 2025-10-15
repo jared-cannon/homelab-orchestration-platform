@@ -105,12 +105,13 @@ export function DevicesPage() {
                   unit="%"
                   percentage={aggregateResources.avg_cpu_usage_percent}
                   cores={aggregateResources.total_cpu_cores}
+                  deviceCount={aggregateResources.online_devices}
                 />
                 <AggregateResourceCard
                   type="ram"
-                  used={aggregateResources.used_ram_mb}
-                  total={aggregateResources.total_ram_mb}
-                  unit="MB"
+                  used={aggregateResources.used_ram_mb / 1024}
+                  total={aggregateResources.total_ram_mb / 1024}
+                  unit="GB"
                   percentage={aggregateResources.ram_usage_percent}
                 />
                 <AggregateResourceCard
