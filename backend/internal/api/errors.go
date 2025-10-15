@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 )
 
 // Global validator instance

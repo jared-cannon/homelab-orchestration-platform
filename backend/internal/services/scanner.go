@@ -13,8 +13,8 @@ import (
 	"github.com/go-ping/ping"
 	"github.com/google/uuid"
 	"github.com/grandcat/zeroconf"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/ssh"
 	"github.com/mdlayher/arp"
 	"gorm.io/gorm"
 )

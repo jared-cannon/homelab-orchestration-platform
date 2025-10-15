@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/ssh"
 	"gorm.io/gorm"
 )
 

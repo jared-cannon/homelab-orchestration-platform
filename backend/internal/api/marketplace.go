@@ -7,7 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
 )
 
 // MarketplaceHandler handles marketplace-related API requests

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 )
 
 // TestLocalRecipeSource tests loading local YAML recipes

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/ssh"
 )
 
 // ValidatorService handles pre-flight validation checks

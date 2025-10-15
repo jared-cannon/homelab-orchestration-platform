@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 )
 
 // RecipeLoader loads and caches marketplace recipes from multiple sources

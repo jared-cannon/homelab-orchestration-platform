@@ -59,7 +59,7 @@ Documentation: [docs/architecture.md](docs/architecture.md), [docs/vision-and-ro
 ### Development
 
 ```bash
-git clone https://github.com/jaredcannon/homelab-orchestration-platform
+git clone https://github.com/jared-cannon/homelab-orchestration-platform
 cd homelab-orchestration-platform
 make install-deps
 make dev

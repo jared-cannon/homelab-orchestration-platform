@@ -5,8 +5,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
 )
 
 // DeploymentHandler handles deployment-related HTTP requests

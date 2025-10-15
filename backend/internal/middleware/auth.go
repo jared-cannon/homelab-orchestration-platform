@@ -7,7 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
 )
 
 // Claims represents JWT claims

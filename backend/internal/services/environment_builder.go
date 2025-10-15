@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 )
 
 // EnvironmentBuilder builds environment variable maps for docker-compose deployment

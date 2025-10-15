@@ -7,7 +7,7 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 	"gorm.io/gorm"
 )
 

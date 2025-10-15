@@ -1,5 +1,5 @@
 packages:
-  - path: "github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+  - path: "github.com/jared-cannon/homelab-orchestration-platform/internal/models"
     type_mappings:
       time.Time: "string"
       uuid.UUID: "string"

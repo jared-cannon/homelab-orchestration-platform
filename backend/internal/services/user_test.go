@@ -3,7 +3,7 @@ package services
 import (
 	"testing"
 
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

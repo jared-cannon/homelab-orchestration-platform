@@ -2,7 +2,7 @@ package api
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
 )
 
 // ScannerHandler handles network scanning HTTP requests

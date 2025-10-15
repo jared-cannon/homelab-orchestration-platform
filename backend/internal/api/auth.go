@@ -4,8 +4,8 @@ import (
 	"errors"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/middleware"
-	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/middleware"
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
 )
 
 // AuthHandler handles authentication-related HTTP requests

@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
-	ws "github.com/jaredcannon/homelab-orchestration-platform/internal/websocket"
+	ws "github.com/jared-cannon/homelab-orchestration-platform/internal/websocket"
 )
 
 // WebSocketHandler handles WebSocket connections
