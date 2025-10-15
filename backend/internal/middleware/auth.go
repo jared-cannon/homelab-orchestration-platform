@@ -18,7 +18,7 @@ type Claims struct {
 
 // getJWTSecret returns the JWT secret from environment or a default (for dev only)
 func getJWTSecret() []byte {
-	secret := os.Getenv("JWT_SECRET")
+	secret := os.Getenv("APP_KEY")
 	if secret == "" {
 		// For development only - in production this should be required
 		secret = "homelab-default-jwt-secret-CHANGE-IN-PRODUCTION"

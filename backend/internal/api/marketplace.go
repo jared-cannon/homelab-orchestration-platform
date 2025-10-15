@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -150,11 +152,25 @@ func (h *MarketplaceHandler) RecommendDevice(c *fiber.Ctx) error {
 		})
 	}
 
-	// Build requirements from recipe
+	// Build requirements from recipe (support both new and legacy formats)
+	var minRAMMB, minStorageGB, cpuCores int
+
+	// Try new format first
+	if recipe.Requirements.Memory.Minimum != "" {
+		minRAMMB = parseMemoryRequirement(recipe.Requirements.Memory.Minimum)
+		minStorageGB = parseStorageRequirement(recipe.Requirements.Storage.Minimum)
+		cpuCores = recipe.Requirements.CPU.MinimumCores
+	} else {
+		// Fallback to legacy format
+		minRAMMB = recipe.Resources.MinRAMMB
+		minStorageGB = recipe.Resources.MinStorageGB
+		cpuCores = recipe.Resources.CPUCores
+	}
+
 	requirements := services.RecipeRequirements{
-		MinRAMMB:     recipe.Resources.MinRAMMB,
-		MinStorageGB: recipe.Resources.MinStorageGB,
-		CPUCores:     recipe.Resources.CPUCores,
+		MinRAMMB:     minRAMMB,
+		MinStorageGB: minStorageGB,
+		CPUCores:     cpuCores,
 	}
 
 	// Score devices
@@ -212,4 +228,33 @@ func (h *MarketplaceHandler) ReloadRecipes(c *fiber.Ctx) error {
 		"message": "Recipes reloaded successfully",
 		"count":   len(recipes),
 	})
+}
+
+// parseMemoryRequirement converts memory string (e.g., "512MB", "1GB") to MB
+func parseMemoryRequirement(mem string) int {
+	mem = strings.ToUpper(strings.TrimSpace(mem))
+	if strings.HasSuffix(mem, "GB") {
+		val := strings.TrimSuffix(mem, "GB")
+		if gb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return gb * 1024
+		}
+	} else if strings.HasSuffix(mem, "MB") {
+		val := strings.TrimSuffix(mem, "MB")
+		if mb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return mb
+		}
+	}
+	return 512 // Default
+}
+
+// parseStorageRequirement converts storage string (e.g., "1GB", "100GB") to GB
+func parseStorageRequirement(storage string) int {
+	storage = strings.ToUpper(strings.TrimSpace(storage))
+	if strings.HasSuffix(storage, "GB") {
+		val := strings.TrimSuffix(storage, "GB")
+		if gb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return gb
+		}
+	}
+	return 1 // Default
 }

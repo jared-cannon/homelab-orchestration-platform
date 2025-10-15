@@ -1,0 +1,112 @@
+# Required fields
+id: nextcloud
+name: NextCloud
+version: 28.0.1
+slug: nextcloud
+category: productivity
+tagline: "Self-hosted file sync and share"
+description: "Complete self-hosted productivity platform with file sync, calendar, contacts, and more."
+
+# Branding
+author: NextCloud GmbH
+website: https://nextcloud.com
+source_code: https://github.com/nextcloud/server
+
+# Resource requirements (intelligent scheduler)
+requirements:
+  memory:
+    minimum: 1GB
+    recommended: 2GB
+  storage:
+    minimum: 10GB
+    recommended: 100GB
+    type: any
+  cpu:
+    minimum_cores: 1
+    recommended_cores: 2
+  reliability: high
+  always_on: true
+
+# Database provisioning - DEMONSTRATES DATABASE POOLING
+database:
+  engine: postgres  # Automatically provisions in shared Postgres instance
+  auto_provision: true
+  version: "15"
+  env_prefix: "POSTGRES_"  # NextCloud uses POSTGRES_ prefix
+
+# Cache provisioning
+cache:
+  engine: redis
+  auto_provision: true
+  version: "7"
+
+# Volume configuration
+volumes:
+  nextcloud-data:
+    description: User files and data
+    size_estimate: 100GB
+    backup_priority: high
+    backup_frequency: daily
+  nextcloud-config:
+    description: NextCloud configuration
+    size_estimate: 1GB
+    backup_priority: high
+    backup_frequency: weekly
+
+# User-configurable options
+config_options:
+  - name: domain
+    label: "Domain"
+    type: string
+    default: "cloud.home"
+    required: true
+    description: "Domain for accessing NextCloud"
+
+  - name: port
+    label: "Port"
+    type: number
+    default: 8081
+    required: true
+    description: "External port to expose NextCloud on"
+
+  - name: admin_user
+    label: "Admin Username"
+    type: string
+    default: "admin"
+    required: true
+    description: "NextCloud admin username"
+
+  - name: admin_password
+    label: "Admin Password"
+    type: password
+    required: true
+    description: "NextCloud admin password"
+
+# Post-deployment automation
+post_install:
+  - type: message
+    title: "NextCloud Installed"
+    message: |
+      NextCloud is now running at https://${DOMAIN}:${PORT}
+
+      Login credentials:
+      - Username: ${ADMIN_USER}
+      - Password: ${ADMIN_PASSWORD}
+
+      Database details (auto-provisioned in shared Postgres instance):
+      - Host: ${POSTGRES_HOST}
+      - Database: ${POSTGRES_NAME}
+      - User: ${POSTGRES_USER}
+
+# Health monitoring
+health:
+  endpoint: /status.php
+  interval: 60s
+  timeout: 10s
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: notify  # Notify but don't auto-update
+  backup_before_update: true
+  rollback_on_failure: true

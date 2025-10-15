@@ -32,28 +32,44 @@ type CredentialService struct {
 	encryptionKey []byte
 }
 
-// getEncryptionKey derives a 32-byte AES-256 key from environment or generates one
-func getEncryptionKey() []byte {
-	// Try to get key from environment variable
-	keyStr := os.Getenv("ENCRYPTION_KEY")
+// getEncryptionKey derives a 32-byte AES-256 key from environment
+func getEncryptionKey() ([]byte, error) {
+	// Get key from environment variable
+	keyStr := os.Getenv("APP_KEY")
 	if keyStr == "" {
-		// For production, this should fail and require explicit key
-		// For development, use a default key (NOT SECURE for production)
-		keyStr = "homelab-default-encryption-key-change-in-production"
+		// Check if this is a test environment
+		if os.Getenv("GO_ENV") == "test" {
+			// Use default key for tests only
+			keyStr = "homelab-test-encryption-key-for-development"
+		} else {
+			// Fail fast in production/development - require explicit key
+			return nil, fmt.Errorf("APP_KEY environment variable is required (set GO_ENV=test for testing)")
+		}
+	}
+
+	// Validate key length (minimum 32 characters for security)
+	if len(keyStr) < 32 {
+		return nil, fmt.Errorf("APP_KEY must be at least 32 characters long")
 	}
 
 	// Derive 32-byte key using SHA-256
 	hash := sha256.Sum256([]byte(keyStr))
-	return hash[:]
+	return hash[:], nil
 }
 
 // NewCredentialService creates a new credential service
 func NewCredentialService() (*CredentialService, error) {
+	// Get and validate encryption key
+	encKey, err := getEncryptionKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize credential service: %w", err)
+	}
+
 	// Don't open keyring here - we'll do it lazily on first use
 	// This avoids password prompts for users relying on SSH agent
 	return &CredentialService{
 		ring:          nil, // Will be opened lazily
-		encryptionKey: getEncryptionKey(),
+		encryptionKey: encKey,
 	}, nil
 }
 
@@ -270,4 +286,42 @@ func (s *CredentialService) TestCredentials(deviceID string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// StoreCredential stores a simple string credential (for database passwords, API keys, etc.)
+func (s *CredentialService) StoreCredential(key, value string) error {
+	// Ensure keyring is open
+	if err := s.ensureRing(); err != nil {
+		return err
+	}
+
+	// Store in keyring
+	item := keyring.Item{
+		Key:         key,
+		Data:        []byte(value),
+		Label:       fmt.Sprintf("Homelab: %s", key),
+		Description: "Credential for homelab services",
+	}
+
+	if err := s.ring.Set(item); err != nil {
+		return fmt.Errorf("failed to store credential: %w", err)
+	}
+
+	return nil
+}
+
+// GetCredential retrieves a simple string credential
+func (s *CredentialService) GetCredential(key string) (string, error) {
+	// Ensure keyring is open
+	if err := s.ensureRing(); err != nil {
+		return "", err
+	}
+
+	// Retrieve from keyring
+	item, err := s.ring.Get(key)
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve credential: %w", err)
+	}
+
+	return string(item.Data), nil
 }

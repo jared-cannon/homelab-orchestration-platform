@@ -12,16 +12,19 @@ import (
 // ResourceHandler handles resource-related HTTP requests
 type ResourceHandler struct {
 	monitoringService *services.ResourceMonitoringService
+	dbPoolManager     *services.DatabasePoolManager
 }
 
 // NewResourceHandler creates a new resource handler
-func NewResourceHandler(monitoringService *services.ResourceMonitoringService) *ResourceHandler {
+func NewResourceHandler(monitoringService *services.ResourceMonitoringService, dbPoolManager *services.DatabasePoolManager) *ResourceHandler {
 	return &ResourceHandler{
 		monitoringService: monitoringService,
+		dbPoolManager:     dbPoolManager,
 	}
 }
 
 // GetAggregateResources handles GET /api/v1/resources/aggregate
+// Now includes database pooling savings
 func (h *ResourceHandler) GetAggregateResources(c *fiber.Ctx) error {
 	resources, err := h.monitoringService.GetAggregateResources()
 	if err != nil {
@@ -30,6 +33,41 @@ func (h *ResourceHandler) GetAggregateResources(c *fiber.Ctx) error {
 		})
 	}
 
+	// Add database pooling statistics
+	if h.dbPoolManager != nil {
+		dbStats, err := h.dbPoolManager.GetSharedInstanceStats()
+		if err == nil {
+			// Merge database pooling stats into response
+			response := fiber.Map{
+				// Resource aggregation
+				"total_devices":          resources.TotalDevices,
+				"online_devices":         resources.OnlineDevices,
+				"offline_devices":        resources.OfflineDevices,
+				"total_cpu_cores":        resources.TotalCPUCores,
+				"used_cpu_cores":         resources.UsedCPUCores,
+				"avg_cpu_usage_percent":  resources.AvgCPUUsagePercent,
+				"total_ram_mb":           resources.TotalRAMMB,
+				"used_ram_mb":            resources.UsedRAMMB,
+				"available_ram_mb":       resources.AvailableRAMMB,
+				"ram_usage_percent":      resources.RAMUsagePercent,
+				"total_storage_gb":       resources.TotalStorageGB,
+				"used_storage_gb":        resources.UsedStorageGB,
+				"available_storage_gb":   resources.AvailableStorageGB,
+				"storage_usage_percent":  resources.StorageUsagePercent,
+
+				// Database pooling savings
+				"database_pooling": fiber.Map{
+					"shared_instances":          dbStats["shared_instances"],
+					"total_databases":           dbStats["total_databases"],
+					"estimated_ram_saved_mb":    dbStats["estimated_ram_saved_mb"],
+					"estimated_ram_saved_percent": dbStats["estimated_ram_saved_percent"],
+				},
+			}
+			return c.JSON(response)
+		}
+	}
+
+	// Fallback: return resources without database stats
 	return c.JSON(resources)
 }
 

@@ -37,6 +37,7 @@ type TestConnectionRequest struct {
 type UpdateDeviceRequest struct {
 	Name       *string                `json:"name,omitempty"`
 	Type       *models.DeviceType     `json:"type,omitempty"`
+	IPAddress  *string                `json:"ip_address,omitempty"`
 	MACAddress *string                `json:"mac_address,omitempty"`
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -128,6 +129,9 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 	}
 	if req.Type != nil {
 		updates["type"] = *req.Type
+	}
+	if req.IPAddress != nil {
+		updates["ip_address"] = *req.IPAddress
 	}
 	if req.MACAddress != nil {
 		updates["mac_address"] = *req.MACAddress

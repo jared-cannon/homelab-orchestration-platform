@@ -31,6 +31,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
   const [formData, setFormData] = useState({
     name: device.name,
     type: device.type,
+    ip_address: device.ip_address,
     mac_address: device.mac_address || '',
   })
 
@@ -39,6 +40,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
     setFormData({
       name: device.name,
       type: device.type,
+      ip_address: device.ip_address,
       mac_address: device.mac_address || '',
     })
   }, [device])
@@ -49,13 +51,16 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
     e.preventDefault()
 
     // Build update object with only changed fields
-    const updates: { name?: string; type?: DeviceType; mac_address?: string } = {}
+    const updates: { name?: string; type?: DeviceType; ip_address?: string; mac_address?: string } = {}
 
     if (formData.name !== device.name) {
       updates.name = formData.name
     }
     if (formData.type !== device.type) {
       updates.type = formData.type
+    }
+    if (formData.ip_address !== device.ip_address) {
+      updates.ip_address = formData.ip_address
     }
     if (formData.mac_address !== (device.mac_address || '')) {
       updates.mac_address = formData.mac_address || undefined
@@ -96,7 +101,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
           <DialogHeader>
             <DialogTitle>Edit Device</DialogTitle>
             <DialogDescription>
-              Update device information. IP address cannot be changed.
+              Update device information including name, type, IP address, and MAC address.
             </DialogDescription>
           </DialogHeader>
 
@@ -135,16 +140,16 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="edit-ip">IP Address (Read-only)</Label>
+              <Label htmlFor="edit-ip">IP Address</Label>
               <Input
                 id="edit-ip"
-                value={device.ip_address}
-                disabled
-                className="bg-muted cursor-not-allowed"
+                value={formData.ip_address}
+                onChange={(e) =>
+                  setFormData({ ...formData, ip_address: e.target.value })
+                }
+                placeholder="192.168.1.100"
+                required
               />
-              <p className="text-xs text-muted-foreground">
-                IP address cannot be changed after creation
-              </p>
             </div>
 
             <div className="grid gap-2">

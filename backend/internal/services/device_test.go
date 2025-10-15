@@ -7,24 +7,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/models"
 	"github.com/stretchr/testify/assert"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
-
-// setupTestDB creates an in-memory SQLite database for testing
-func setupTestDB(t *testing.T) *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	assert.NoError(t, err, "Failed to open in-memory database")
-
-	// Run migrations
-	err = db.AutoMigrate(&models.Device{}, &models.Application{}, &models.Deployment{})
-	assert.NoError(t, err, "Failed to run migrations")
-
-	return db
-}
 
 // setupTestCredentialService creates a credential service with file backend for testing
 func setupTestCredentialService(t *testing.T) *CredentialService {
+	// Set test environment variable (also set in TestMain, but redundant for safety)
+	t.Setenv("GO_ENV", "test")
+
 	// Use file backend only for testing to avoid OS keychain dependencies
 	ring, err := keyring.Open(keyring.Config{
 		ServiceName: "homelab-test",
@@ -38,7 +27,14 @@ func setupTestCredentialService(t *testing.T) *CredentialService {
 	})
 	assert.NoError(t, err, "Failed to open test keyring")
 
-	return &CredentialService{ring: ring}
+	// Get encryption key (will use test default since GO_ENV=test)
+	encKey, err := getEncryptionKey()
+	assert.NoError(t, err, "Failed to get encryption key")
+
+	return &CredentialService{
+		ring:          ring,
+		encryptionKey: encKey,
+	}
 }
 
 func TestDeviceService_CreateDevice(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -26,14 +27,17 @@ const (
 
 // DeploymentService handles deployment operations
 type DeploymentService struct {
-	db              *gorm.DB
-	sshClient       *ssh.Client
-	recipeLoader    *RecipeLoader
-	deviceService   *DeviceService
-	wsHub           WSHub
-	firewallService *FirewallService
-	deviceLocks     sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
-	cancelFuncs     sync.Map // Map of deployment ID -> context.CancelFunc for cancellation
+	db                 *gorm.DB
+	sshClient          *ssh.Client
+	recipeLoader       RecipeProvider
+	deviceService      *DeviceService
+	wsHub              WSHub
+	firewallService    *FirewallService
+	deviceScorer       *DeviceScorer
+	dbPoolManager      *DatabasePoolManager
+	environmentBuilder *EnvironmentBuilder
+	deviceLocks        sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
+	cancelFuncs        sync.Map // Map of deployment ID -> context.CancelFunc for cancellation
 }
 
 // WSHub interface for WebSocket broadcasting
@@ -41,29 +45,121 @@ type WSHub interface {
 	Broadcast(channel string, event string, data interface{})
 }
 
+// RecipeProvider interface for accessing recipes
+type RecipeProvider interface {
+	GetRecipe(slug string) (*models.Recipe, error)
+}
+
 // NewDeploymentService creates a new deployment service
 func NewDeploymentService(
 	db *gorm.DB,
 	sshClient *ssh.Client,
-	recipeLoader *RecipeLoader,
+	recipeLoader RecipeProvider,
 	deviceService *DeviceService,
+	credService *CredentialService,
 	wsHub WSHub,
 ) *DeploymentService {
+	dbPoolManager := NewDatabasePoolManager(db, sshClient, credService)
+
 	return &DeploymentService{
-		db:              db,
-		sshClient:       sshClient,
-		recipeLoader:    recipeLoader,
-		deviceService:   deviceService,
-		wsHub:           wsHub,
-		firewallService: NewFirewallService(sshClient),
+		db:                 db,
+		sshClient:          sshClient,
+		recipeLoader:       recipeLoader,
+		deviceService:      deviceService,
+		wsHub:              wsHub,
+		firewallService:    NewFirewallService(sshClient),
+		deviceScorer:       NewDeviceScorer(db, sshClient),
+		dbPoolManager:      dbPoolManager,
+		environmentBuilder: NewEnvironmentBuilder(credService, dbPoolManager),
 	}
 }
 
 // CreateDeploymentRequest represents a request to create a deployment
 type CreateDeploymentRequest struct {
-	RecipeSlug string                 `json:"recipe_slug"`
-	DeviceID   uuid.UUID              `json:"device_id"`
-	Config     map[string]interface{} `json:"config"`
+	RecipeSlug     string                 `json:"recipe_slug"`
+	DeviceID       uuid.UUID              `json:"device_id,omitempty"`       // Optional - if not provided, will recommend
+	AutoSelectDevice bool                   `json:"auto_select_device"`       // Auto-select best device
+	Config         map[string]interface{} `json:"config"`
+}
+
+// DeviceRecommendation represents a recommended device for a recipe
+type DeviceRecommendation struct {
+	DeviceID       uuid.UUID `json:"device_id"`
+	DeviceName     string    `json:"device_name"`
+	DeviceIP       string    `json:"device_ip"`
+	Score          int       `json:"score"`          // 0-100
+	Recommendation string    `json:"recommendation"` // "best", "good", "acceptable", "not-recommended"
+	Reasons        []string  `json:"reasons"`
+	Available      bool      `json:"available"`
+}
+
+// RecommendDevicesForRecipe recommends devices for deploying a recipe using intelligent placement
+func (s *DeploymentService) RecommendDevicesForRecipe(recipeSlug string) ([]DeviceRecommendation, error) {
+	// Get the recipe
+	recipe, err := s.recipeLoader.GetRecipe(recipeSlug)
+	if err != nil {
+		return nil, fmt.Errorf("recipe not found: %w", err)
+	}
+
+	// Convert recipe requirements to device scorer format
+	requirements := RecipeRequirements{
+		MinRAMMB:     s.parseMemoryRequirement(recipe.Requirements.Memory.Minimum),
+		MinStorageGB: s.parseStorageRequirement(recipe.Requirements.Storage.Minimum),
+		CPUCores:     recipe.Requirements.CPU.MinimumCores,
+	}
+
+	// Score all devices
+	deviceScores, err := s.deviceScorer.ScoreDevicesForRecipe(requirements)
+	if err != nil {
+		return nil, fmt.Errorf("failed to score devices: %w", err)
+	}
+
+	// Convert to DeviceRecommendation format
+	recommendations := make([]DeviceRecommendation, len(deviceScores))
+	for i, score := range deviceScores {
+		recommendations[i] = DeviceRecommendation{
+			DeviceID:       score.DeviceID,
+			DeviceName:     score.DeviceName,
+			DeviceIP:       score.DeviceIP,
+			Score:          score.Score,
+			Recommendation: score.Recommendation,
+			Reasons:        score.Reasons,
+			Available:      score.Available,
+		}
+	}
+
+	return recommendations, nil
+}
+
+// parseMemoryRequirement converts memory string (e.g., "512MB", "1GB") to MB
+func (s *DeploymentService) parseMemoryRequirement(mem string) int {
+	// Simple parser for common formats
+	mem = strings.ToUpper(strings.TrimSpace(mem))
+	if strings.HasSuffix(mem, "GB") {
+		val := strings.TrimSuffix(mem, "GB")
+		if gb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return gb * 1024
+		}
+	} else if strings.HasSuffix(mem, "MB") {
+		val := strings.TrimSuffix(mem, "MB")
+		if mb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return mb
+		}
+	}
+	return 512 // Default
+}
+
+// parseStorageRequirement converts storage string (e.g., "1GB", "100GB") to GB
+func (s *DeploymentService) parseStorageRequirement(storage string) int {
+	// Simple parser for common formats
+	storage = strings.ToUpper(strings.TrimSpace(storage))
+	if strings.HasSuffix(storage, "GB") {
+		val := strings.TrimSuffix(storage, "GB")
+		if gb, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			return gb
+		}
+	}
+	return 1 // Default
 }
 
 // CreateDeployment creates and deploys a new application
@@ -72,6 +168,44 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 	recipe, err := s.recipeLoader.GetRecipe(req.RecipeSlug)
 	if err != nil {
 		return nil, fmt.Errorf("recipe not found: %w", err)
+	}
+
+	// Validate recipe manifest (Requirements, Database config, etc.)
+	if err := recipe.Validate(); err != nil {
+		return nil, fmt.Errorf("recipe validation failed: %w", err)
+	}
+
+	// Handle intelligent device selection
+	var deviceID uuid.UUID
+	if req.AutoSelectDevice || req.DeviceID == uuid.Nil {
+		// Use intelligent placement to select best device
+		log.Printf("[Deployment] Auto-selecting device for %s using intelligent placement", recipe.Name)
+		recommendations, err := s.RecommendDevicesForRecipe(req.RecipeSlug)
+		if err != nil {
+			return nil, fmt.Errorf("failed to recommend devices: %w", err)
+		}
+
+		if len(recommendations) == 0 {
+			return nil, fmt.Errorf("no available devices found")
+		}
+
+		// Find first available device
+		var bestDevice *DeviceRecommendation
+		for i := range recommendations {
+			if recommendations[i].Available {
+				bestDevice = &recommendations[i]
+				break
+			}
+		}
+
+		if bestDevice == nil {
+			return nil, fmt.Errorf("no suitable devices found for %s", recipe.Name)
+		}
+
+		deviceID = bestDevice.DeviceID
+		log.Printf("[Deployment] Selected device %s (score: %d) for %s", bestDevice.DeviceName, bestDevice.Score, recipe.Name)
+	} else {
+		deviceID = req.DeviceID
 	}
 
 	// Validate the recipe template before deployment
@@ -84,8 +218,8 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Get the device
-	device, err := s.deviceService.GetDevice(req.DeviceID)
+	// Get the device (using intelligently selected deviceID or user-provided)
+	device, err := s.deviceService.GetDevice(deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("device not found: %w", err)
 	}
@@ -103,7 +237,7 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 	deployment := &models.Deployment{
 		RecipeSlug:     req.RecipeSlug,
 		RecipeName:     recipe.Name,
-		DeviceID:       req.DeviceID,
+		DeviceID:       deviceID, // Use intelligently selected or user-provided device
 		Status:         models.DeploymentStatusValidating,
 		Config:         configJSON,
 		ComposeProject: s.generateProjectName(recipe.Slug),
@@ -475,15 +609,59 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	// Update status to preparing
 	s.updateStatus(deployment, models.DeploymentStatusPreparing, "")
 
-	// Render the Docker Compose template
-	s.appendLog(deployment, "Rendering Docker Compose template...")
-	rendered, err := s.renderComposeTemplate(recipe, deployment, device)
-	if err != nil {
-		s.appendLog(deployment, fmt.Sprintf("❌ Template rendering failed: %v", err))
-		s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to render template: %v", err))
+	// Parse user config from deployment
+	var userConfig map[string]interface{}
+	if err := json.Unmarshal(deployment.Config, &userConfig); err != nil {
+		s.appendLog(deployment, fmt.Sprintf("❌ Failed to parse config: %v", err))
+		s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to parse config: %v", err))
 		return
 	}
-	s.appendLog(deployment, "✓ Template rendered successfully")
+
+	// INTELLIGENT ORCHESTRATION: Database Provisioning
+	var provisionedDB *models.ProvisionedDatabase
+	if recipe.Database.AutoProvision && recipe.Database.Engine != "none" && recipe.Database.Engine != "" {
+		s.appendLog(deployment, fmt.Sprintf("Provisioning %s database using intelligent pooling...", recipe.Database.Engine))
+
+		db, err := s.dbPoolManager.ProvisionDatabase(deployment, device, recipe.Database)
+		if err != nil {
+			s.appendLog(deployment, fmt.Sprintf("❌ Database provisioning failed: %v", err))
+			s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to provision database: %v", err))
+			return
+		}
+		provisionedDB = db
+		s.appendLog(deployment, fmt.Sprintf("✓ Database provisioned: %s", provisionedDB.DatabaseName))
+		s.appendLog(deployment, fmt.Sprintf("  Using shared %s instance (saving ~%dMB RAM)", recipe.Database.Engine, 200))
+	}
+
+	// Build environment variables (replaces template rendering)
+	s.appendLog(deployment, "Building environment variables...")
+	envMap, envFileContent, err := s.environmentBuilder.BuildEnvironment(
+		deployment,
+		recipe,
+		userConfig,
+		device,
+		provisionedDB,
+	)
+	if err != nil {
+		s.appendLog(deployment, fmt.Sprintf("❌ Environment building failed: %v", err))
+		s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to build environment: %v", err))
+		return
+	}
+	s.appendLog(deployment, fmt.Sprintf("✓ Environment variables built (%d vars)", len(envMap)))
+
+	// Get docker-compose content (standard format, no templates)
+	composeContent := recipe.ComposeContent
+	if composeContent == "" {
+		// Fallback to legacy template rendering if ComposeContent not available
+		s.appendLog(deployment, "Using legacy template rendering (recipe not migrated to new format)")
+		composeContent, err = s.renderComposeTemplate(recipe, deployment, device)
+		if err != nil {
+			s.appendLog(deployment, fmt.Sprintf("❌ Template rendering failed: %v", err))
+			s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to render template: %v", err))
+			return
+		}
+	}
+	s.appendLog(deployment, "✓ Docker Compose prepared")
 
 	// Check for cancellation after template rendering
 	select {
@@ -494,21 +672,17 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	default:
 	}
 
-	// Store generated compose for debugging
-	deployment.GeneratedCompose = rendered
+	// Store generated compose and env for debugging
+	deployment.GeneratedCompose = composeContent
 
-	// Now that we've rendered the template, sanitize the config in the database
+	// Now sanitize the config in the database
 	// This ensures passwords are not kept in memory or database after use
-	sanitizedConfig := s.sanitizeConfig(make(map[string]interface{})) // Empty for now, will be updated below
-	var originalConfig map[string]interface{}
-	json.Unmarshal(deployment.Config, &originalConfig)
-	sanitizedConfig = s.sanitizeConfig(originalConfig)
+	sanitizedConfig := s.sanitizeConfig(userConfig)
 	deployment.Config, _ = json.Marshal(sanitizedConfig)
-
 	s.db.Save(deployment)
 
-	// Extract ports from rendered compose
-	portsToOpen := ExtractPortsFromCompose(rendered)
+	// Extract ports from compose
+	portsToOpen := ExtractPortsFromCompose(composeContent)
 	if len(portsToOpen) > 0 {
 		// Format port list for logging
 		portList := formatPortSpecs(portsToOpen)
@@ -537,9 +711,9 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	// Update status to deploying
 	s.updateStatus(deployment, models.DeploymentStatusDeploying, "")
 
-	// Deploy to device
+	// Deploy to device (with env file)
 	s.appendLog(deployment, fmt.Sprintf("Deploying containers (project: %s)...", deployment.ComposeProject))
-	if err := s.deployToDevice(device, deployment.ComposeProject, rendered); err != nil {
+	if err := s.deployToDeviceWithEnv(device, deployment.ComposeProject, composeContent, envFileContent); err != nil {
 		s.appendLog(deployment, fmt.Sprintf("❌ Deployment failed: %v", err))
 		s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Deployment failed: %v", err))
 		// Attempt cleanup of partial deployment
@@ -802,8 +976,13 @@ func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[st
 	return sanitized
 }
 
-// deployToDevice deploys the rendered compose file to the target device
+// deployToDevice deploys the rendered compose file to the target device (legacy)
 func (s *DeploymentService) deployToDevice(device *models.Device, projectName, composeContent string) error {
+	return s.deployToDeviceWithEnv(device, projectName, composeContent, "")
+}
+
+// deployToDeviceWithEnv deploys docker-compose.yaml + .env file to the target device
+func (s *DeploymentService) deployToDeviceWithEnv(device *models.Device, projectName, composeContent, envFileContent string) error {
 	host := fmt.Sprintf("%s:22", device.IPAddress)
 
 	// Use home directory instead of /opt to avoid needing sudo
@@ -821,8 +1000,18 @@ func (s *DeploymentService) deployToDevice(device *models.Device, projectName, c
 		return fmt.Errorf("failed to write compose file: %w", err)
 	}
 
+	// Write .env file if provided
+	if envFileContent != "" {
+		envFile := fmt.Sprintf("%s/.env", deployDir)
+		writeEnvCmd := fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", envFile, envFileContent)
+		if _, err := s.sshClient.ExecuteWithTimeout(host, writeEnvCmd, 1*time.Minute); err != nil {
+			return fmt.Errorf("failed to write .env file: %w", err)
+		}
+		log.Printf("[Deployment] Wrote .env file with environment variables")
+	}
+
 	// Deploy with docker compose
-	// This can take a long time if images need to be pulled
+	// Docker Compose will automatically read the .env file
 	deployCmd := fmt.Sprintf("cd %s && docker compose -p %s up -d", deployDir, projectName)
 	output, err := s.sshClient.ExecuteWithTimeout(host, deployCmd, 15*time.Minute)
 	if err != nil {

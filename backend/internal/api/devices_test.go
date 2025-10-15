@@ -289,6 +289,107 @@ func TestDeviceAPI_UpdateDevice(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "Updated Name", updated.Name)
 	})
+
+	t.Run("Update device IP address", func(t *testing.T) {
+		// Create device
+		device := &models.Device{
+			Name:      "IP Update Test",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "192.168.1.110",
+		}
+		creds := &services.DeviceCredentials{
+			Type:     "password",
+			Username: "admin",
+			Password: "password",
+		}
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err)
+
+		// Update IP address
+		newIP := "192.168.1.111"
+		updateReq := UpdateDeviceRequest{
+			IPAddress: &newIP,
+		}
+		body, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest("PATCH", "/api/v1/devices/"+device.ID.String(), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req, -1)
+		assert.NoError(t, err)
+		assert.Equal(t, 200, resp.StatusCode)
+
+		var updated models.Device
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		err = json.Unmarshal(bodyBytes, &updated)
+		assert.NoError(t, err)
+		assert.Equal(t, "192.168.1.111", updated.IPAddress)
+	})
+
+	t.Run("Reject invalid IP address on update", func(t *testing.T) {
+		// Create device
+		device := &models.Device{
+			Name:      "Invalid IP Test",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "192.168.1.112",
+		}
+		creds := &services.DeviceCredentials{
+			Type:     "password",
+			Username: "admin",
+			Password: "password",
+		}
+		err := deviceService.CreateDevice(device, creds)
+		assert.NoError(t, err)
+
+		// Try to update with invalid IP
+		invalidIP := "not-an-ip-address"
+		updateReq := UpdateDeviceRequest{
+			IPAddress: &invalidIP,
+		}
+		body, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest("PATCH", "/api/v1/devices/"+device.ID.String(), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req, -1)
+		assert.NoError(t, err)
+		assert.Equal(t, 400, resp.StatusCode)
+	})
+
+	t.Run("Reject duplicate IP address on update", func(t *testing.T) {
+		// Create two devices
+		device1 := &models.Device{
+			Name:      "Device 1",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "192.168.1.113",
+		}
+		creds := &services.DeviceCredentials{
+			Type:     "password",
+			Username: "admin",
+			Password: "password",
+		}
+		err := deviceService.CreateDevice(device1, creds)
+		assert.NoError(t, err)
+
+		device2 := &models.Device{
+			Name:      "Device 2",
+			Type:      models.DeviceTypeServer,
+			IPAddress: "192.168.1.114",
+		}
+		err = deviceService.CreateDevice(device2, creds)
+		assert.NoError(t, err)
+
+		// Try to update device2's IP to match device1's IP
+		conflictIP := "192.168.1.113"
+		updateReq := UpdateDeviceRequest{
+			IPAddress: &conflictIP,
+		}
+		body, _ := json.Marshal(updateReq)
+		req := httptest.NewRequest("PATCH", "/api/v1/devices/"+device2.ID.String(), bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req, -1)
+		assert.NoError(t, err)
+		assert.Equal(t, 400, resp.StatusCode)
+	})
 }
 
 func TestDeviceAPI_DeleteDevice(t *testing.T) {

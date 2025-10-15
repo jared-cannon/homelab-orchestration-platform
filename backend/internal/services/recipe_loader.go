@@ -105,6 +105,12 @@ func (r *RecipeLoader) CheckForUpdates() (map[string][]string, error) {
 
 // Validate validates a recipe's structure and required fields
 func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
+	// First, run the Recipe model's built-in validation for new manifest format
+	// This validates Requirements, Database config, Cache config, etc.
+	if err := recipe.Validate(); err != nil {
+		return fmt.Errorf("manifest validation failed: %w", err)
+	}
+
 	// Basic required fields
 	if recipe.ID == "" {
 		return fmt.Errorf("recipe missing required field: id")
@@ -121,15 +127,18 @@ func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
 	if recipe.Description == "" {
 		return fmt.Errorf("recipe missing required field: description")
 	}
-	if recipe.ComposeTemplate == "" {
-		return fmt.Errorf("recipe missing required field: compose_template")
+
+	// ComposeTemplate is optional now (new recipes use ComposeContent instead)
+	if recipe.ComposeTemplate == "" && recipe.ComposeContent == "" {
+		return fmt.Errorf("recipe must have either compose_template or compose content")
 	}
 
-	// Validate resources
-	if recipe.Resources.MinRAMMB <= 0 {
+	// Validate legacy resources (if provided)
+	// New recipes use Requirements instead, so these are optional
+	if recipe.Resources.MinRAMMB < 0 {
 		return fmt.Errorf("recipe has invalid min_ram_mb: %d", recipe.Resources.MinRAMMB)
 	}
-	if recipe.Resources.MinStorageGB <= 0 {
+	if recipe.Resources.MinStorageGB < 0 {
 		return fmt.Errorf("recipe has invalid min_storage_gb: %d", recipe.Resources.MinStorageGB)
 	}
 	if recipe.Resources.CPUCores < 0 {

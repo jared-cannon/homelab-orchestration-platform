@@ -12,6 +12,9 @@ import (
 
 // setupTestCredentialService creates a credential service with file backend for testing
 func setupCredService(t *testing.T) *CredentialService {
+	// Set test environment variable (also set in TestMain, but redundant for safety)
+	t.Setenv("GO_ENV", "test")
+
 	// Create a temporary directory for test credentials
 	tempDir := filepath.Join(os.TempDir(), "homelab-test-"+uuid.New().String())
 	err := os.MkdirAll(tempDir, 0700)
@@ -42,9 +45,13 @@ func setupCredService(t *testing.T) *CredentialService {
 	})
 	assert.NoError(t, err, "Failed to create test keyring")
 
+	// Get encryption key (will use test default since GO_ENV=test)
+	encKey, err := getEncryptionKey()
+	assert.NoError(t, err, "Failed to get encryption key")
+
 	return &CredentialService{
 		ring:          ring,
-		encryptionKey: getEncryptionKey(),
+		encryptionKey: encKey,
 	}
 }
 

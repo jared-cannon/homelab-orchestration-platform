@@ -103,6 +103,45 @@ func (s *DeviceService) ListDevices() ([]models.Device, error) {
 
 // UpdateDevice updates a device
 func (s *DeviceService) UpdateDevice(id uuid.UUID, updates map[string]interface{}) error {
+	// If updating IP address, validate and check for conflicts
+	if newIP, ok := updates["ip_address"]; ok {
+		ipStr, ok := newIP.(string)
+		if !ok {
+			return fmt.Errorf("invalid IP address format")
+		}
+
+		// Get the current device to check auth type and old IP
+		device, err := s.GetDevice(id)
+		if err != nil {
+			return fmt.Errorf("device not found")
+		}
+
+		// Validate IP address or hostname based on auth type
+		if device.AuthType == models.AuthTypeTailscale {
+			if !ValidateHostname(ipStr) {
+				return fmt.Errorf("invalid hostname or IP address: %s", ipStr)
+			}
+		} else {
+			if !ValidateIPAddress(ipStr) {
+				return fmt.Errorf("invalid IP address: %s", ipStr)
+			}
+		}
+
+		// Check if another device already has this IP (excluding current device)
+		var existing models.Device
+		if err := s.db.Where("ip_address = ? AND id != ?", ipStr, id).First(&existing).Error; err == nil {
+			return fmt.Errorf("device with IP %s already exists", ipStr)
+		}
+
+		// Close existing SSH connection if IP is changing
+		if s.sshClient != nil && device.IPAddress != ipStr {
+			oldHost := device.IPAddress + ":22"
+			if err := s.sshClient.Close(oldHost); err == nil {
+				fmt.Printf("[DeviceService] Closed SSH connection to old IP %s after IP update\n", device.IPAddress)
+			}
+		}
+	}
+
 	if err := s.db.Model(&models.Device{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("failed to update device: %w", err)
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/services"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/ssh"
 	"github.com/jaredcannon/homelab-orchestration-platform/internal/websocket"
+	"github.com/joho/godotenv"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -54,6 +55,8 @@ func initDB() (*gorm.DB, error) {
 		&models.NFSExport{},
 		&models.NFSMount{},
 		&models.Volume{},
+		&models.SharedDatabaseInstance{},  // New: Database pooling
+		&models.ProvisionedDatabase{},     // New: Database pooling
 	)
 	if err != nil {
 		return nil, err
@@ -64,6 +67,11 @@ func initDB() (*gorm.DB, error) {
 }
 
 func main() {
+	// Load environment variables from .env file
+	if err := godotenv.Load(); err != nil {
+		log.Printf("⚠️  No .env file found or error loading it: %v", err)
+	}
+
 	// Initialize database
 	db, err := initDB()
 	if err != nil {
@@ -117,8 +125,9 @@ func main() {
 	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator, resourceValidator)
 	deviceScorer := services.NewDeviceScorer(db, sshClient)
 
-	// Initialize deployment service
-	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, wsHub)
+	// Initialize deployment service with intelligent orchestration
+	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, credService, wsHub)
+	log.Printf("🧠 Intelligent orchestration enabled (device scoring + database pooling)")
 
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
@@ -210,8 +219,11 @@ func main() {
 	scannerHandler := api.NewScannerHandler(scannerService)
 	scannerHandler.RegisterRoutes(protectedGroup)
 
-	// Register resource monitoring routes
-	resourceHandler := api.NewResourceHandler(resourceMonitoring)
+	// Initialize database pool manager for aggregate resources
+	dbPoolManager := services.NewDatabasePoolManager(db, sshClient, credService)
+
+	// Register resource monitoring routes (with database pooling stats)
+	resourceHandler := api.NewResourceHandler(resourceMonitoring, dbPoolManager)
 	resourceHandler.RegisterRoutes(protectedGroup)
 
 	// Register software, NFS, volume, marketplace, and deployment handlers
