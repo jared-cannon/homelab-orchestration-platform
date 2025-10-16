@@ -1,0 +1,143 @@
+id: traefik
+name: Traefik Reverse Proxy
+slug: traefik
+category: infrastructure
+tagline: "Automatic HTTPS reverse proxy and load balancer"
+description: "Modern reverse proxy and load balancer that automatically discovers your services and provides HTTPS certificates. Perfect for exposing your homelab apps with clean domains instead of IP:port combinations."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/traefik.png"
+author: "Traefik Labs"
+website: "https://traefik.io"
+source_code: "https://github.com/traefik/traefik"
+
+# Resource requirements for intelligent scheduling
+requirements:
+  memory:
+    minimum: "128MB"
+    recommended: "256MB"
+  storage:
+    minimum: "1GB"
+    recommended: "2GB"
+    type: "any"
+  cpu:
+    minimum_cores: 1
+    recommended_cores: 1
+  reliability: "high"
+  always_on: true
+
+# No database needed
+database:
+  engine: "none"
+  auto_provision: false
+
+# No cache needed
+cache:
+  engine: "none"
+  auto_provision: false
+
+# Volume configuration
+volumes:
+  traefik-certificates:
+    description: "Let's Encrypt SSL certificates and ACME data"
+    size_estimate: "100MB"
+    backup_priority: "high"
+    backup_frequency: "daily"
+
+# User-configurable options
+config_options:
+  - name: traefik_version
+    label: "Traefik Version"
+    type: string
+    default: "v3.2"
+    required: true
+    description: "Traefik Docker image tag (use 'v3.2' or 'latest')"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "traefik"
+    required: true
+    description: "Name for the Docker container"
+
+  - name: enable_lets_encrypt
+    label: "Enable Let's Encrypt SSL"
+    type: boolean
+    default: true
+    description: "Automatically obtain and renew SSL certificates"
+
+  - name: acme_email
+    label: "Email Address"
+    type: string
+    default: "admin@example.com"
+    required: true
+    description: "Email for Let's Encrypt certificate notifications"
+
+  - name: enable_dashboard
+    label: "Enable Traefik Dashboard"
+    type: boolean
+    default: true
+    description: "Enable the Traefik web dashboard"
+
+  - name: dashboard_domain
+    label: "Dashboard Domain"
+    type: string
+    default: "traefik.homelab.local"
+    required: false
+    description: "Domain for accessing the Traefik dashboard"
+
+  - name: dashboard_port
+    label: "Dashboard Port"
+    type: number
+    default: 8080
+    required: false
+    description: "Port to expose dashboard on (when not using domain routing)"
+
+  - name: dashboard_username
+    label: "Dashboard Username"
+    type: string
+    default: "admin"
+    required: false
+    description: "Username for dashboard authentication"
+
+  - name: dashboard_password
+    label: "Dashboard Password"
+    type: string
+    default: ""
+    required: false
+    description: "Password for dashboard authentication (leave empty to disable auth)"
+
+  - name: enable_http3
+    label: "Enable HTTP/3 Support"
+    type: boolean
+    default: false
+    description: "Enable HTTP/3 (QUIC) protocol support (experimental)"
+
+# Post-installation steps
+post_install:
+  - type: "message"
+    title: "Network Created"
+    message: "The 'homelab-proxy' network has been created for your apps to use"
+
+  - type: "message"
+    title: "Dashboard Access"
+    message: "Access the Traefik dashboard to view routes and services. Configure authentication in production environments."
+
+  - type: "message"
+    title: "Next Steps"
+    message: |
+      1. When deploying apps, enable "Proxy Mode" to use Traefik
+      2. Apps will automatically get HTTPS certificates via Let's Encrypt
+      3. Access apps via clean domains instead of IP:port combinations
+
+# Health monitoring
+health:
+  endpoint: "/ping"
+  interval: "30s"
+  timeout: "10s"
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: "manual"
+  backup_before_update: true
+  rollback_on_failure: true

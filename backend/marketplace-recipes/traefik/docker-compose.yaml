@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-v3.2}
+    container_name: ${CONTAINER_NAME:-traefik}
+    restart: unless-stopped
+
+    command:
+      # API and Dashboard
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=homelab-proxy"
+
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+
+      # HTTP to HTTPS redirect
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+
+      # Let's Encrypt (if enabled via environment)
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+
+      # HTTP/3 support (if enabled)
+      - "--entrypoints.websecure.http3.advertisedport=443"
+
+      # Health check endpoint
+      - "--ping=true"
+      - "--ping.entrypoint=web"
+
+      # Logging
+      - "--log.level=INFO"
+      - "--accesslog=false"
+
+    ports:
+      - "80:80"
+      - "443:443"
+      - "${DASHBOARD_PORT:-8080}:8080"
+      # Uncomment for HTTP/3 support (requires ENABLE_HTTP3=true in manifest config)
+      # - "443:443/udp"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certificates:/letsencrypt
+
+    networks:
+      - homelab-proxy
+
+    labels:
+      - "traefik.enable=true"
+
+      # Dashboard router
+      - "traefik.http.routers.dashboard.rule=Host(`${DASHBOARD_DOMAIN:-traefik.homelab.local}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+
+      # Dashboard authentication (if password provided)
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${DASHBOARD_USERNAME:-admin}:${DASHBOARD_PASSWORD_HASH:-}"
+
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    environment:
+      - TZ=UTC
+
+volumes:
+  traefik-certificates:
+    driver: local
+
+networks:
+  homelab-proxy:
+    name: homelab-proxy
+    external: true

@@ -1,0 +1,142 @@
+id: vaultwarden
+name: Vaultwarden
+slug: vaultwarden
+category: security
+tagline: "Self-hosted password manager"
+description: "Self-hosted Bitwarden-compatible password manager. Lightweight, secure, and feature-complete. Perfect for managing passwords across all your devices without monthly fees. Requires HTTPS for security."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/vaultwarden.png"
+author: "Daniel García"
+website: "https://github.com/dani-garcia/vaultwarden"
+source_code: "https://github.com/dani-garcia/vaultwarden"
+
+# Resource requirements for intelligent scheduling
+requirements:
+  memory:
+    minimum: "512MB"
+    recommended: "1GB"
+  storage:
+    minimum: "1GB"
+    recommended: "5GB"
+    type: "any"
+  cpu:
+    minimum_cores: 1
+    recommended_cores: 2
+  reliability: "high"
+  always_on: true
+
+# Database configuration (optional PostgreSQL support)
+database:
+  engine: "none"
+  auto_provision: false
+  # Note: Vaultwarden uses SQLite by default but supports PostgreSQL/MySQL
+  # Users can manually configure external database via environment variables
+
+# No cache needed
+cache:
+  engine: "none"
+  auto_provision: false
+
+# Volume configuration
+volumes:
+  vaultwarden-data:
+    description: "Vaultwarden data including encrypted password vault (SQLite database)"
+    size_estimate: "500MB"
+    backup_priority: "high"
+    backup_frequency: "daily"
+
+# User-configurable options
+config_options:
+  - name: vaultwarden_version
+    label: "Vaultwarden Version"
+    type: string
+    default: "latest"
+    required: true
+    description: "Vaultwarden Docker image tag"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "vaultwarden"
+    required: true
+    description: "Name for the Docker container"
+
+  - name: domain
+    label: "Domain"
+    type: string
+    default: "vault.homelab.local"
+    required: true
+    description: "Domain name for accessing Vaultwarden (HTTPS required)"
+
+  - name: web_port
+    label: "Web Port"
+    type: number
+    default: 8080
+    required: true
+    description: "Internal port (should be proxied via Traefik for HTTPS)"
+
+  - name: allow_signups
+    label: "Allow New User Registrations"
+    type: boolean
+    default: false
+    description: "Allow anyone to create an account (disable after first user for security)"
+
+  - name: require_email
+    label: "Require Email Verification"
+    type: boolean
+    default: false
+    description: "Require email verification for new accounts (requires SMTP configuration)"
+
+  - name: admin_token
+    label: "Admin Panel Token"
+    type: string
+    default: ""
+    required: false
+    description: "Secure token for accessing admin panel (leave empty to disable admin panel)"
+
+  - name: log_level
+    label: "Log Level"
+    type: string
+    default: "info"
+    required: false
+    description: "Logging level (trace, debug, info, warn, error, off)"
+
+# Post-installation steps
+post_install:
+  - type: "message"
+    title: "SECURITY WARNING"
+    message: "Vaultwarden REQUIRES HTTPS for proper operation. Ensure you're accessing it via Traefik or another reverse proxy with valid SSL certificates."
+
+  - type: "message"
+    title: "Initial Setup"
+    message: |
+      1. Visit your Vaultwarden domain to create your account
+      2. Install Bitwarden browser extensions from https://bitwarden.com/download/
+      3. Configure your server URL in the extension to your domain
+      4. IMPORTANT: Disable signups after creating your account
+
+  - type: "message"
+    title: "Security Best Practices"
+    message: |
+      - Use a STRONG master password - it's the key to all your passwords
+      - Enable 2FA (Two-Factor Authentication) for extra security
+      - Regular backups are critical - your vault contains all your passwords
+      - Keep the admin panel disabled unless needed
+      - Monitor logs for suspicious activity
+
+  - type: "message"
+    title: "Client Apps"
+    message: "Install the Bitwarden mobile app to access passwords on the go. All official Bitwarden clients are compatible with Vaultwarden."
+
+# Health monitoring
+health:
+  endpoint: "/alive"
+  interval: "60s"
+  timeout: "10s"
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: "manual"
+  backup_before_update: true
+  rollback_on_failure: true

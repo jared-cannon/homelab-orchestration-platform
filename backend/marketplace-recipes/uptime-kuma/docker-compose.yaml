@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:${KUMA_VERSION:-1}
+    container_name: ${CONTAINER_NAME:-uptime-kuma}
+    restart: unless-stopped
+
+    ports:
+      # Only expose port if not using proxy
+      # - "${WEB_PORT:-3001}:3001"
+
+    volumes:
+      - uptime-kuma-data:/app/data
+      # Important: Use local volume or filesystem with POSIX file locks support
+      # Avoid NFS to prevent SQLite database corruption
+
+    networks:
+      - default
+      # Optionally join proxy network if enabled
+      # - homelab-proxy
+
+    labels:
+      # Traefik labels (if proxy enabled)
+      - "traefik.enable=${ENABLE_PROXY:-false}"
+      - "traefik.http.routers.uptime-kuma.rule=Host(`${DOMAIN:-status.homelab.local}`)"
+      - "traefik.http.routers.uptime-kuma.entrypoints=websecure"
+      - "traefik.http.routers.uptime-kuma.tls.certresolver=letsencrypt"
+      - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
+      - "traefik.docker.network=homelab-proxy"
+
+    healthcheck:
+      test: ["CMD-SHELL", "node extra/healthcheck || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    environment:
+      # Timezone configuration
+      - TZ=UTC
+      # File permissions
+      - UMASK=0022
+      # Optional: Customize data directory
+      # - DATA_DIR=/app/data
+
+    # Logging configuration to prevent excessive disk usage
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  uptime-kuma-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
+  # External network for Traefik (uncomment if using proxy - must match network name above)
+  homelab-proxy:
+    external: true

@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  vaultwarden:
+    image: vaultwarden/server:${VAULTWARDEN_VERSION:-latest}
+    container_name: ${CONTAINER_NAME:-vaultwarden}
+    restart: unless-stopped
+
+    ports:
+      # Expose port for Traefik to proxy
+      - "${WEB_PORT:-8080}:80"
+
+    volumes:
+      - vaultwarden-data:/data
+
+    networks:
+      - default
+      # Must join proxy network for HTTPS
+      - homelab-proxy
+
+    labels:
+      # Traefik is REQUIRED for Vaultwarden (HTTPS mandatory)
+      - "traefik.enable=true"
+      - "traefik.http.routers.vaultwarden.rule=Host(`${DOMAIN:-vault.homelab.local}`)"
+      - "traefik.http.routers.vaultwarden.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden.tls.certresolver=letsencrypt"
+      - "traefik.http.services.vaultwarden.loadbalancer.server.port=80"
+      - "traefik.docker.network=homelab-proxy"
+
+      # WebSocket support for web vault
+      - "traefik.http.routers.vaultwarden-websocket.rule=Host(`${DOMAIN:-vault.homelab.local}`) && Path(`/notifications/hub`)"
+      - "traefik.http.routers.vaultwarden-websocket.entrypoints=websecure"
+      - "traefik.http.routers.vaultwarden-websocket.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.vaultwarden-websocket.service=vaultwarden-websocket"
+      - "traefik.http.services.vaultwarden-websocket.loadbalancer.server.port=3012"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/alive || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    environment:
+      # Domain configuration (REQUIRED for proper operation)
+      - DOMAIN=https://${DOMAIN:-vault.homelab.local}
+
+      # Signups configuration
+      - SIGNUPS_ALLOWED=${ALLOW_SIGNUPS:-false}
+      - SIGNUPS_VERIFY=${REQUIRE_EMAIL:-false}
+
+      # Admin panel (disabled by default for security)
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+      # To generate a secure token: openssl rand -base64 48
+
+      # WebSocket notifications
+      - WEBSOCKET_ENABLED=true
+      - WEBSOCKET_ADDRESS=0.0.0.0
+      - WEBSOCKET_PORT=3012
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FILE=/data/vaultwarden.log
+      - EXTENDED_LOGGING=true
+
+      # Security settings
+      - SHOW_PASSWORD_HINT=false
+      - INVITATIONS_ALLOWED=true
+      - INVITATION_ORG_NAME=Homelab
+
+      # Database (SQLite by default, can be changed to PostgreSQL/MySQL)
+      # - DATABASE_URL=postgresql://user:password@postgres:5432/vaultwarden
+      # - DATABASE_URL=mysql://user:password@mysql:3306/vaultwarden
+
+      # SMTP configuration (optional - for email verification and invitations)
+      # - SMTP_HOST=smtp.example.com
+      # - SMTP_FROM=vaultwarden@example.com
+      # - SMTP_PORT=587
+      # - SMTP_SECURITY=starttls
+      # - SMTP_USERNAME=username
+      # - SMTP_PASSWORD=password
+
+      # File attachment size limits
+      - ATTACHMENT_LIMIT_KB=10240
+      - ATTACHMENT_LIMIT_MB=10
+
+      # Timezone
+      - TZ=UTC
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  vaultwarden-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
+  homelab-proxy:
+    external: true

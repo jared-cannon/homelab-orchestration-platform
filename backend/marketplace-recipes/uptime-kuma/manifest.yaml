@@ -1,0 +1,116 @@
+id: uptime-kuma
+name: Uptime Kuma
+slug: uptime-kuma
+category: monitoring
+tagline: "Self-hosted uptime monitoring tool"
+description: "Beautiful and easy-to-use uptime monitoring tool. Monitor HTTP(s), TCP, Ping, DNS, and more. Get notified when your services go down via Telegram, Discord, Slack, email, and 90+ notification services. Perfect for monitoring your entire homelab infrastructure."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/uptime-kuma.png"
+author: "Louis Lam"
+website: "https://uptime.kuma.pet"
+source_code: "https://github.com/louislam/uptime-kuma"
+
+# Resource requirements for intelligent scheduling
+requirements:
+  memory:
+    minimum: "256MB"
+    recommended: "512MB"
+  storage:
+    minimum: "1GB"
+    recommended: "2GB"
+    type: "any"
+  cpu:
+    minimum_cores: 1
+    recommended_cores: 1
+  reliability: "high"
+  always_on: true
+
+# No database needed (uses internal SQLite)
+database:
+  engine: "none"
+  auto_provision: false
+
+# No cache needed
+cache:
+  engine: "none"
+  auto_provision: false
+
+# Volume configuration
+volumes:
+  uptime-kuma-data:
+    description: "Uptime Kuma monitoring data and configuration (SQLite database)"
+    size_estimate: "500MB"
+    backup_priority: "high"
+    backup_frequency: "daily"
+
+# User-configurable options
+config_options:
+  - name: kuma_version
+    label: "Uptime Kuma Version"
+    type: string
+    default: "1"
+    required: true
+    description: "Uptime Kuma Docker image tag (use '1' for latest v1.x or specific version)"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "uptime-kuma"
+    required: true
+    description: "Name for the Docker container"
+
+  - name: enable_proxy
+    label: "Enable Traefik Proxy"
+    type: boolean
+    default: false
+    description: "Use Traefik reverse proxy (requires Traefik to be installed)"
+
+  - name: domain
+    label: "Domain (if using proxy)"
+    type: string
+    default: "status.homelab.local"
+    required: false
+    description: "Domain for accessing Uptime Kuma via Traefik"
+
+  - name: web_port
+    label: "Web Port (if not using proxy)"
+    type: number
+    default: 3001
+    required: false
+    description: "Port to expose Uptime Kuma on"
+
+# Post-installation steps
+post_install:
+  - type: "message"
+    title: "Initial Setup"
+    message: "Open Uptime Kuma in your browser and create an admin account to start monitoring your services."
+
+  - type: "message"
+    title: "Recommended Monitors"
+    message: |
+      Add monitors for:
+      1. HTTP(S) monitors for web apps (Vaultwarden, Nextcloud, etc.)
+      2. Ping monitors for all devices (Router, NAS, servers)
+      3. Docker Container monitors for daemon health
+      4. Port monitors for non-HTTP services (SSH, databases)
+
+  - type: "message"
+    title: "Setup Notifications"
+    message: "Configure notifications in Settings → Notifications. Uptime Kuma supports 90+ services including Email, Telegram, Discord, Slack, and more."
+
+  - type: "message"
+    title: "Status Page"
+    message: "Create a public status page to share homelab health with family/team. Customize it with your logo and colors."
+
+# Health monitoring
+health:
+  endpoint: "/"
+  interval: "30s"
+  timeout: "10s"
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: "manual"
+  backup_before_update: true
+  rollback_on_failure: true

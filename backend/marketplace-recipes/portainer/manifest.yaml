@@ -1,0 +1,126 @@
+id: portainer
+name: Portainer
+slug: portainer
+category: infrastructure
+tagline: "Powerful Docker management UI"
+description: "Feature-rich web interface for managing Docker containers, images, networks, and volumes. Perfect for advanced container management, monitoring, and troubleshooting. Integrates seamlessly with this platform's deployments."
+
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/portainer.png"
+author: "Portainer.io"
+website: "https://www.portainer.io"
+source_code: "https://github.com/portainer/portainer"
+
+# Resource requirements for intelligent scheduling
+requirements:
+  memory:
+    minimum: "256MB"
+    recommended: "512MB"
+  storage:
+    minimum: "1GB"
+    recommended: "2GB"
+    type: "any"
+  cpu:
+    minimum_cores: 1
+    recommended_cores: 1
+  reliability: "medium"
+  always_on: true
+
+# No database needed (uses internal SQLite)
+database:
+  engine: "none"
+  auto_provision: false
+
+# No cache needed
+cache:
+  engine: "none"
+  auto_provision: false
+
+# Volume configuration
+volumes:
+  portainer-data:
+    description: "Portainer configuration and database"
+    size_estimate: "500MB"
+    backup_priority: "high"
+    backup_frequency: "weekly"
+
+# User-configurable options
+config_options:
+  - name: portainer_version
+    label: "Portainer Version"
+    type: string
+    default: "2.21"
+    required: true
+    description: "Portainer CE version (e.g., '2.21' or 'latest')"
+
+  - name: container_name
+    label: "Container Name"
+    type: string
+    default: "portainer"
+    required: true
+    description: "Name for the Docker container"
+
+  - name: web_port
+    label: "Web UI Port"
+    type: number
+    default: 9000
+    required: true
+    description: "Port to access Portainer web interface"
+
+  - name: enable_proxy
+    label: "Enable Traefik Proxy"
+    type: boolean
+    default: false
+    description: "Use Traefik reverse proxy (requires Traefik to be installed)"
+
+  - name: domain
+    label: "Domain (if using proxy)"
+    type: string
+    default: "portainer.homelab.local"
+    required: false
+    description: "Domain for accessing Portainer via Traefik"
+
+  - name: enable_edge_agent
+    label: "Enable Edge Agent"
+    type: boolean
+    default: false
+    description: "Enable Edge Agent for managing remote devices"
+
+  - name: edge_port
+    label: "Edge Agent Port"
+    type: number
+    default: 8000
+    required: false
+    description: "Port for Edge Agent communication"
+
+  - name: hide_labels
+    label: "Hide Platform Containers"
+    type: boolean
+    default: true
+    description: "Hide containers deployed by this platform from Portainer"
+
+# Post-installation steps
+post_install:
+  - type: "message"
+    title: "Initial Setup Required"
+    message: "Open Portainer in your browser and create an admin account. Then select 'Docker' as the environment type and click 'Connect'."
+
+  - type: "message"
+    title: "Security Reminder"
+    message: "Change the admin password regularly and consider putting Portainer behind Traefik for HTTPS if not already configured."
+
+  - type: "message"
+    title: "Integration Available"
+    message: "All containers deployed through this platform are visible in Portainer. Look for the 'Manage in Portainer' button on deployed apps for deep-linking."
+
+# Health monitoring
+health:
+  endpoint: "/api/status"
+  interval: "30s"
+  timeout: "10s"
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: "manual"
+  backup_before_update: true
+  rollback_on_failure: true

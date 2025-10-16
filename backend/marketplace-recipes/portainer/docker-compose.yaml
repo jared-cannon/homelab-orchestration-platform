@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_VERSION:-2.21}
+    container_name: ${CONTAINER_NAME:-portainer}
+    restart: unless-stopped
+
+    # To hide platform containers, add this command line flag:
+    # command: --hide-label owner=homelab-orchestrator
+
+    ports:
+      - "${WEB_PORT:-9000}:9000"
+      # Edge Agent port (if enabled)
+      # - "${EDGE_PORT:-8000}:8000"
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer-data:/data
+
+    networks:
+      - default
+      # Join proxy network if enabled (uncomment when using Traefik)
+      # - homelab-proxy
+
+    labels:
+      # Traefik labels (if proxy enabled)
+      - "traefik.enable=${ENABLE_PROXY:-false}"
+      - "traefik.http.routers.portainer.rule=Host(`${DOMAIN:-portainer.homelab.local}`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+      - "traefik.docker.network=homelab-proxy"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9000/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    environment:
+      - TZ=UTC
+
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  portainer-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
+  # External network for Traefik (uncomment if using proxy - must match network name above)
+  homelab-proxy:
+    external: true
