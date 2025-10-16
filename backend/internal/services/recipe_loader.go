@@ -2,7 +2,6 @@ package services
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -15,20 +14,13 @@ type RecipeLoader struct {
 	mu              sync.RWMutex
 }
 
-// NewRecipeLoader creates a new recipe loader with multiple sources
+// NewRecipeLoader creates a new recipe loader with local recipe source
 func NewRecipeLoader(recipesPath string) *RecipeLoader {
 	// Create local recipe source
 	localSource := NewLocalRecipeSource(recipesPath)
 
-	// Create Coolify recipe source with cache directory
-	cacheDir := filepath.Join(filepath.Dir(recipesPath), "recipe-cache")
-	coolifySource := NewCoolifyRecipeSource(cacheDir)
-
-	// Combine sources (local recipes override Coolify if same slug)
-	compositeSource := NewCompositeRecipeSource(
-		coolifySource, // Load Coolify first
-		localSource,   // Local overrides Coolify
-	)
+	// Use composite source to allow future expansion
+	compositeSource := NewCompositeRecipeSource(localSource)
 
 	return &RecipeLoader{
 		compositeSource: compositeSource,
@@ -128,9 +120,9 @@ func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
 		return fmt.Errorf("recipe missing required field: description")
 	}
 
-	// ComposeTemplate is optional now (new recipes use ComposeContent instead)
-	if recipe.ComposeTemplate == "" && recipe.ComposeContent == "" {
-		return fmt.Errorf("recipe must have either compose_template or compose content")
+	// All recipes must have ComposeContent (docker-compose.yaml)
+	if recipe.ComposeContent == "" {
+		return fmt.Errorf("recipe must have compose content (docker-compose.yaml)")
 	}
 
 	// Validate legacy resources (if provided)
@@ -157,8 +149,18 @@ func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
 		if opt.Type == "" {
 			return fmt.Errorf("config option %s missing type", opt.Name)
 		}
-		// Validate type is one of: string, number, boolean
-		if opt.Type != "string" && opt.Type != "number" && opt.Type != "boolean" {
+		// Validate type is one of the allowed types
+		validTypes := map[string]bool{
+			"string":   true,
+			"number":   true,
+			"boolean":  true,
+			"secret":   true,
+			"api_key":  true,
+			"password": true,
+			"email":    true,
+			"domain":   true,
+		}
+		if !validTypes[opt.Type] {
 			return fmt.Errorf("config option %s has invalid type: %s", opt.Name, opt.Type)
 		}
 
@@ -199,22 +201,22 @@ func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
 	return nil
 }
 
-// validateComposeTemplate validates the Docker Compose template syntax
+// validateComposeTemplate validates the Docker Compose content syntax
 func (r *RecipeLoader) validateComposeTemplate(recipe *models.Recipe) error {
-	template := recipe.ComposeTemplate
+	content := recipe.ComposeContent
 
 	// Check for basic Docker Compose structure
-	if !strings.Contains(template, "services:") {
-		return fmt.Errorf("compose template must contain 'services:' section")
+	if !strings.Contains(content, "services:") {
+		return fmt.Errorf("compose content must contain 'services:' section")
 	}
 
 	// Validate it's not empty after trimming
-	if len(strings.TrimSpace(template)) == 0 {
-		return fmt.Errorf("compose template is empty")
+	if len(strings.TrimSpace(content)) == 0 {
+		return fmt.Errorf("compose content is empty")
 	}
 
 	// Check for common YAML syntax errors
-	lines := strings.Split(template, "\n")
+	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
@@ -234,70 +236,54 @@ func (r *RecipeLoader) validateComposeTemplate(recipe *models.Recipe) error {
 
 // validateTemplateVariables checks that template variables are defined in config_options
 func (r *RecipeLoader) validateTemplateVariables(recipe *models.Recipe, configVars map[string]bool) error {
-	// Extract variables from template ({{.VarName}})
-	template := recipe.ComposeTemplate
+	// Extract variables from docker-compose content (${VAR_NAME})
+	content := recipe.ComposeContent
 
 	// Find all template variables
 	start := 0
 	for {
-		idx := strings.Index(template[start:], "{{")
+		idx := strings.Index(content[start:], "${")
 		if idx == -1 {
 			break
 		}
 		idx += start
 
-		endIdx := strings.Index(template[idx:], "}}")
+		endIdx := strings.Index(content[idx:], "}")
 		if endIdx == -1 {
 			return fmt.Errorf("unclosed template variable at position %d", idx)
 		}
 		endIdx += idx
 
-		// Extract variable name (remove {{. and }})
-		varExpr := template[idx+2 : endIdx]
-		varExpr = strings.TrimSpace(varExpr)
+		// Extract variable name (remove ${ and })
+		varName := content[idx+2 : endIdx]
+		varName = strings.TrimSpace(varName)
 
-		// Remove leading dot if present
-		if strings.HasPrefix(varExpr, ".") {
-			varExpr = varExpr[1:]
-		}
-
-		// Skip if it's a built-in variable or control structure
-		if strings.HasPrefix(varExpr, "if ") ||
-		   strings.HasPrefix(varExpr, "range ") ||
-		   strings.HasPrefix(varExpr, "end") ||
-		   varExpr == "DEPLOYMENT_ID" ||
-		   varExpr == "COMPOSE_PROJECT" {
-			start = endIdx + 2
+		// Skip built-in deployment variables
+		if varName == "DEPLOYMENT_ID" ||
+			varName == "COMPOSE_PROJECT" ||
+			varName == "DEVICE_IP" ||
+			strings.HasPrefix(varName, "POSTGRES_") ||
+			strings.HasPrefix(varName, "MYSQL_") ||
+			strings.HasPrefix(varName, "REDIS_") {
+			start = endIdx + 1
 			continue
 		}
 
-		// Convert PascalCase to snake_case for lookup
-		snakeCase := pascalToSnakeCase(varExpr)
+		// Convert UPPER_SNAKE_CASE to snake_case for lookup in config options
+		lowerVarName := strings.ToLower(varName)
 
 		// Check if variable is defined in config options
-		if !configVars[snakeCase] && !configVars[varExpr] {
-			// Allow some common derived variables
-			if !strings.HasSuffix(varExpr, "PasswordHash") && varExpr != "DashboardPasswordHash" {
-				return fmt.Errorf("template variable '%s' is not defined in config_options (expected config option: %s)", varExpr, snakeCase)
+		if !configVars[lowerVarName] {
+			// Allow derived variables like PASSWORD_HASH
+			if !strings.HasSuffix(varName, "_HASH") {
+				return fmt.Errorf("docker-compose variable '%s' is not defined in config_options (expected config option: %s)", varName, lowerVarName)
 			}
 		}
 
-		start = endIdx + 2
+		start = endIdx + 1
 	}
 
 	return nil
-}
-
-// pascalToSnakeCase converts PascalCase to snake_case
-func pascalToSnakeCase(input string) string {
-	var result strings.Builder
-	for i, r := range input {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			result.WriteRune('_')
-		}
-		result.WriteRune(r)
-	}
-	return strings.ToLower(result.String())
 }
 
 // Reload reloads all recipes from disk (useful for development/updates)

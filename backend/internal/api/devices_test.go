@@ -67,6 +67,12 @@ func createTestCredService(t *testing.T) *services.CredentialService {
 		os.RemoveAll(tempDir)
 	})
 
+	// Set GO_ENV=test so NewCredentialService uses test encryption key
+	os.Setenv("GO_ENV", "test")
+	t.Cleanup(func() {
+		os.Unsetenv("GO_ENV")
+	})
+
 	os.Setenv("KEYRING_BACKEND", "file")
 	t.Cleanup(func() {
 		os.Unsetenv("KEYRING_BACKEND")

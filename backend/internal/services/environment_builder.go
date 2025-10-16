@@ -1,8 +1,6 @@
 package services
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -12,14 +10,14 @@ import (
 // EnvironmentBuilder builds environment variable maps for docker-compose deployment
 // Combines user config + generated secrets + database credentials
 type EnvironmentBuilder struct {
-	credService *CredentialService
+	secretManager *SecretManager
 	dbPoolManager *DatabasePoolManager
 }
 
 // NewEnvironmentBuilder creates a new environment builder
 func NewEnvironmentBuilder(credService *CredentialService, dbPoolManager *DatabasePoolManager) *EnvironmentBuilder {
 	return &EnvironmentBuilder{
-		credService:   credService,
+		secretManager: NewSecretManager(credService),
 		dbPoolManager: dbPoolManager,
 	}
 }
@@ -36,7 +34,7 @@ func (eb *EnvironmentBuilder) BuildEnvironment(
 
 	envMap := make(map[string]string)
 
-	// 1. Add user-provided configuration
+	// 1. Add user-provided configuration (convert to uppercase env var names)
 	for key, value := range userConfig {
 		envMap[strings.ToUpper(key)] = fmt.Sprintf("%v", value)
 	}
@@ -46,7 +44,16 @@ func (eb *EnvironmentBuilder) BuildEnvironment(
 	envMap["COMPOSE_PROJECT"] = deployment.ComposeProject
 	envMap["DEVICE_IP"] = device.IPAddress
 
-	// 3. Add database credentials if database was provisioned
+	// 3. Generate or retrieve persistent secrets
+	secrets, err := eb.secretManager.GenerateOrRetrieveSecrets(deployment.ID, recipe, userConfig)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate secrets: %w", err)
+	}
+	for key, value := range secrets {
+		envMap[strings.ToUpper(key)] = value
+	}
+
+	// 4. Add database credentials if database was provisioned
 	if provisionedDB != nil {
 		dbEnvVars, err := eb.buildDatabaseEnvVars(provisionedDB, recipe.Database.EnvPrefix)
 		if err != nil {
@@ -57,12 +64,12 @@ func (eb *EnvironmentBuilder) BuildEnvironment(
 		}
 	}
 
-	// 4. Generate any required secrets (API keys, admin tokens, etc.)
-	if err := eb.generateRequiredSecrets(recipe, deployment, envMap); err != nil {
-		return nil, "", fmt.Errorf("failed to generate secrets: %w", err)
+	// 5. Process password hashing (creates _HASH variants for password fields)
+	if err := eb.secretManager.ProcessPasswordHashing(recipe, envMap); err != nil {
+		return nil, "", fmt.Errorf("failed to hash passwords: %w", err)
 	}
 
-	// 5. Build .env file content
+	// 6. Build .env file content
 	envFileContent := eb.buildEnvFileContent(envMap)
 
 	return envMap, envFileContent, nil
@@ -75,7 +82,7 @@ func (eb *EnvironmentBuilder) buildDatabaseEnvVars(provisionedDB *models.Provisi
 	}
 
 	// Get database password from credential store
-	password, err := eb.credService.GetCredential(provisionedDB.CredentialKey)
+	password, err := eb.secretManager.credService.GetCredential(provisionedDB.CredentialKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve database password: %w", err)
 	}
@@ -83,15 +90,14 @@ func (eb *EnvironmentBuilder) buildDatabaseEnvVars(provisionedDB *models.Provisi
 	envVars := provisionedDB.GetConnectionEnvVars(envPrefix)
 	envVars[envPrefix+"PASSWORD"] = password
 
-	// Also provide common alternative formats
-	envVars[envPrefix+"CONNECTION_STRING"] = eb.buildConnectionString(provisionedDB, password)
+	// Also provide connection string
+	envVars[envPrefix+"CONNECTION_STRING"] = buildConnectionString(provisionedDB, password)
 
 	return envVars, nil
 }
 
 // buildConnectionString creates a database connection string
-func (eb *EnvironmentBuilder) buildConnectionString(db *models.ProvisionedDatabase, password string) string {
-	// Determine engine from shared instance
+func buildConnectionString(db *models.ProvisionedDatabase, password string) string {
 	if db.SharedDatabaseInstance == nil {
 		return ""
 	}
@@ -108,57 +114,15 @@ func (eb *EnvironmentBuilder) buildConnectionString(db *models.ProvisionedDataba
 	}
 }
 
-// generateRequiredSecrets generates any required secrets based on recipe config options
-func (eb *EnvironmentBuilder) generateRequiredSecrets(recipe *models.Recipe, deployment *models.Deployment, envMap map[string]string) error {
-	// Scan config options for secret types
-	for _, option := range recipe.ConfigOptions {
-		// If option type is "secret" or "password" and not provided, generate it
-		if (option.Type == "secret" || option.Type == "password" || option.Type == "api_key") {
-			envKey := strings.ToUpper(option.Name)
-			if _, exists := envMap[envKey]; !exists {
-				// Generate a secure random secret
-				secret, err := eb.generateSecret(32)
-				if err != nil {
-					return fmt.Errorf("failed to generate secret for %s: %w", option.Name, err)
-				}
-				envMap[envKey] = secret
-			}
-		}
-	}
-
-	// Common secrets that apps might need
-	// Generate ADMIN_TOKEN if not provided (for apps like Vaultwarden, Traefik, etc.)
-	if _, exists := envMap["ADMIN_TOKEN"]; !exists {
-		secret, err := eb.generateSecret(32)
-		if err != nil {
-			return err
-		}
-		envMap["ADMIN_TOKEN"] = secret
-	}
-
-	return nil
-}
-
-// generateSecret generates a cryptographically secure random secret
-func (eb *EnvironmentBuilder) generateSecret(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	// Use URL-safe base64 encoding
-	return base64.URLEncoding.EncodeToString(bytes)[:length], nil
-}
-
 // buildEnvFileContent creates the content for a .env file
 func (eb *EnvironmentBuilder) buildEnvFileContent(envMap map[string]string) string {
 	var builder strings.Builder
 	builder.WriteString("# Auto-generated environment file\n")
 	builder.WriteString("# Generated by Homelab Orchestration Platform\n\n")
 
-	// Sort keys for consistent output (optional, for better debugging)
 	for key, value := range envMap {
 		// Escape values that contain special characters
-		escapedValue := eb.escapeEnvValue(value)
+		escapedValue := escapeEnvValue(value)
 		builder.WriteString(fmt.Sprintf("%s=%s\n", key, escapedValue))
 	}
 
@@ -166,7 +130,7 @@ func (eb *EnvironmentBuilder) buildEnvFileContent(envMap map[string]string) stri
 }
 
 // escapeEnvValue escapes special characters in environment variable values
-func (eb *EnvironmentBuilder) escapeEnvValue(value string) string {
+func escapeEnvValue(value string) string {
 	// If value contains spaces, quotes, or special characters, wrap in quotes
 	needsQuotes := strings.ContainsAny(value, " \t\n\"'$`\\#")
 
@@ -177,47 +141,4 @@ func (eb *EnvironmentBuilder) escapeEnvValue(value string) string {
 	// Escape existing quotes
 	escaped := strings.ReplaceAll(value, "\"", "\\\"")
 	return fmt.Sprintf("\"%s\"", escaped)
-}
-
-// ValidateEnvironment checks that all required environment variables are present
-func (eb *EnvironmentBuilder) ValidateEnvironment(recipe *models.Recipe, envMap map[string]string) error {
-	var missing []string
-
-	// Check required config options
-	for _, option := range recipe.ConfigOptions {
-		if option.Required {
-			envKey := strings.ToUpper(option.Name)
-			if _, exists := envMap[envKey]; !exists {
-				missing = append(missing, option.Name)
-			}
-		}
-	}
-
-	// Check database requirements
-	if recipe.Database.AutoProvision {
-		dbPrefix := recipe.Database.EnvPrefix
-		if dbPrefix == "" {
-			dbPrefix = "DB_"
-		}
-
-		requiredDBKeys := []string{
-			dbPrefix + "HOST",
-			dbPrefix + "PORT",
-			dbPrefix + "NAME",
-			dbPrefix + "USER",
-			dbPrefix + "PASSWORD",
-		}
-
-		for _, key := range requiredDBKeys {
-			if _, exists := envMap[key]; !exists {
-				missing = append(missing, key)
-			}
-		}
-	}
-
-	if len(missing) > 0 {
-		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
-	}
-
-	return nil
 }

@@ -33,12 +33,14 @@ func TestEnvironmentBuilder_BuildEnvironment(t *testing.T) {
 		ConfigOptions: []models.RecipeConfigOption{
 			{Name: "port", Type: "number", Required: true},
 			{Name: "domain", Type: "string", Required: true},
+			{Name: "api_token", Type: "secret", Required: false}, // Will be auto-generated if not provided
 		},
 	}
 
 	userConfig := map[string]interface{}{
 		"port":   8080,
 		"domain": "test.local",
+		// api_token not provided - should be auto-generated
 	}
 
 	envMap, envFileContent, err := envBuilder.BuildEnvironment(deployment, recipe, userConfig, device, nil)
@@ -51,9 +53,9 @@ func TestEnvironmentBuilder_BuildEnvironment(t *testing.T) {
 	assert.Equal(t, "test-app-abc123", envMap["COMPOSE_PROJECT"])
 	assert.Equal(t, "192.168.1.100", envMap["DEVICE_IP"])
 
-	// Check admin token was generated
-	assert.NotEmpty(t, envMap["ADMIN_TOKEN"])
-	assert.Len(t, envMap["ADMIN_TOKEN"], 32)
+	// Check api_token was auto-generated (since it's type="secret" and not provided by user)
+	assert.NotEmpty(t, envMap["API_TOKEN"])
+	assert.Len(t, envMap["API_TOKEN"], 32)
 
 	// Check env file content
 	assert.Contains(t, envFileContent, "PORT=8080")
@@ -126,29 +128,7 @@ func TestEnvironmentBuilder_BuildEnvironmentWithDatabase(t *testing.T) {
 	assert.Contains(t, envFileContent, "POSTGRES_NAME=nextcloud_db")
 }
 
-func TestEnvironmentBuilder_GenerateSecret(t *testing.T) {
-	credService := setupTestCredentialService(t)
-	envBuilder := NewEnvironmentBuilder(credService, nil)
-
-	secret1, err := envBuilder.generateSecret(32)
-	require.NoError(t, err)
-	assert.Len(t, secret1, 32)
-
-	// Test uniqueness
-	secret2, err := envBuilder.generateSecret(32)
-	require.NoError(t, err)
-	assert.NotEqual(t, secret1, secret2)
-
-	// Test different lengths
-	secret3, err := envBuilder.generateSecret(16)
-	require.NoError(t, err)
-	assert.Len(t, secret3, 16)
-}
-
-func TestEnvironmentBuilder_EscapeEnvValue(t *testing.T) {
-	credService := setupTestCredentialService(t)
-	envBuilder := NewEnvironmentBuilder(credService, nil)
-
+func TestEscapeEnvValue(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -164,99 +144,13 @@ func TestEnvironmentBuilder_EscapeEnvValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := envBuilder.escapeEnvValue(tt.input)
+			result := escapeEnvValue(tt.input)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestEnvironmentBuilder_ValidateEnvironment(t *testing.T) {
-	credService := setupTestCredentialService(t)
-	envBuilder := NewEnvironmentBuilder(credService, nil)
-
-	recipe := &models.Recipe{
-		ConfigOptions: []models.RecipeConfigOption{
-			{Name: "port", Type: "number", Required: true},
-			{Name: "domain", Type: "string", Required: true},
-			{Name: "optional_field", Type: "string", Required: false},
-		},
-	}
-
-	t.Run("Valid environment", func(t *testing.T) {
-		envMap := map[string]string{
-			"PORT":   "8080",
-			"DOMAIN": "test.local",
-		}
-
-		err := envBuilder.ValidateEnvironment(recipe, envMap)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Missing required field", func(t *testing.T) {
-		envMap := map[string]string{
-			"PORT": "8080",
-			// Missing DOMAIN
-		}
-
-		err := envBuilder.ValidateEnvironment(recipe, envMap)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "domain")
-	})
-
-	t.Run("Optional field missing is OK", func(t *testing.T) {
-		envMap := map[string]string{
-			"PORT":   "8080",
-			"DOMAIN": "test.local",
-			// optional_field not provided
-		}
-
-		err := envBuilder.ValidateEnvironment(recipe, envMap)
-		assert.NoError(t, err)
-	})
-}
-
-func TestEnvironmentBuilder_ValidateEnvironmentWithDatabase(t *testing.T) {
-	credService := setupTestCredentialService(t)
-	envBuilder := NewEnvironmentBuilder(credService, nil)
-
-	recipe := &models.Recipe{
-		Database: models.RecipeDatabaseConfig{
-			Engine:        "postgres",
-			AutoProvision: true,
-			EnvPrefix:     "DB_",
-		},
-	}
-
-	t.Run("Valid database environment", func(t *testing.T) {
-		envMap := map[string]string{
-			"DB_HOST":     "localhost",
-			"DB_PORT":     "5432",
-			"DB_NAME":     "test_db",
-			"DB_USER":     "test_user",
-			"DB_PASSWORD": "secret",
-		}
-
-		err := envBuilder.ValidateEnvironment(recipe, envMap)
-		assert.NoError(t, err)
-	})
-
-	t.Run("Missing database credentials", func(t *testing.T) {
-		envMap := map[string]string{
-			"DB_HOST": "localhost",
-			"DB_PORT": "5432",
-			// Missing DB_NAME, DB_USER, DB_PASSWORD
-		}
-
-		err := envBuilder.ValidateEnvironment(recipe, envMap)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "DB_NAME")
-	})
-}
-
-func TestEnvironmentBuilder_BuildConnectionString(t *testing.T) {
-	credService := setupTestCredentialService(t)
-	envBuilder := NewEnvironmentBuilder(credService, nil)
-
+func TestBuildConnectionString(t *testing.T) {
 	tests := []struct {
 		name     string
 		db       *models.ProvisionedDatabase
@@ -295,7 +189,7 @@ func TestEnvironmentBuilder_BuildConnectionString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			connString := envBuilder.buildConnectionString(tt.db, tt.password)
+			connString := buildConnectionString(tt.db, tt.password)
 			assert.Equal(t, tt.expected, connString)
 		})
 	}
@@ -328,3 +222,4 @@ func TestEnvironmentBuilder_BuildEnvFileContent(t *testing.T) {
 	assert.Contains(t, content, "WITH_SPACES=\"hello world\"")
 	assert.Contains(t, content, "WITH_QUOTES=\"say \\\"hello\\\"\"")
 }
+

@@ -1,10 +1,8 @@
 package services
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
-	"text/template"
 
 	"github.com/google/uuid"
 	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
@@ -229,48 +227,31 @@ func (s *MarketplaceService) ReloadRecipes() error {
 	return s.recipeLoader.Reload()
 }
 
-// renderComposePreview renders the Docker Compose template for preview/validation
+// renderComposePreview renders the Docker Compose content for preview/validation
 func (s *MarketplaceService) renderComposePreview(recipe *models.Recipe, config map[string]interface{}, device *models.Device) (string, error) {
-	// Import deployment service's template rendering logic
-	// We'll use a simplified version here for preview
+	// Start with docker-compose.yaml content
+	content := recipe.ComposeContent
 
-	// Normalize config keys: Convert snake_case to PascalCase for Go templates
-	normalizedConfig := make(map[string]interface{})
-	for key, value := range config {
-		// Convert snake_case to PascalCase
-		pascalKey := snakeToPascalCase(key)
-		normalizedConfig[pascalKey] = value
-		// Also keep original key for backwards compatibility
-		normalizedConfig[key] = value
-	}
+	// Build environment variable map for substitution
+	envVars := make(map[string]string)
 
 	// Add preview-specific variables
-	normalizedConfig["DEPLOYMENT_ID"] = "preview"
-	normalizedConfig["COMPOSE_PROJECT"] = "preview-" + recipe.Slug
+	envVars["DEPLOYMENT_ID"] = "preview"
+	envVars["COMPOSE_PROJECT"] = "preview-" + recipe.Slug
 
-	// Parse and execute template
-	tmpl, err := template.New("compose").Parse(recipe.ComposeTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
+	// Add user config (convert to UPPER_SNAKE_CASE)
+	for key, value := range config {
+		upperKey := toEnvVarName(key)
+		envVars[upperKey] = fmt.Sprintf("%v", value)
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, normalizedConfig); err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
+	// Simple variable substitution for preview
+	for varName, varValue := range envVars {
+		placeholder := "${" + varName + "}"
+		content = strings.ReplaceAll(content, placeholder, varValue)
 	}
 
-	return buf.String(), nil
-}
-
-// snakeToPascalCase converts snake_case to PascalCase
-func snakeToPascalCase(input string) string {
-	parts := strings.Split(input, "_")
-	for i, part := range parts {
-		if len(part) > 0 {
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
-		}
-	}
-	return strings.Join(parts, "")
+	return content, nil
 }
 
 // CheckForUpdates checks all recipe sources for available updates

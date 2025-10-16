@@ -26,11 +26,8 @@ type Recipe struct {
 	// Resource Requirements (for intelligent scheduler)
 	Requirements RecipeRequirements `yaml:"requirements" json:"requirements"`
 
-	// Docker Compose Content (standard format, NOT Go template)
+	// Docker Compose Content (standard format with ${VAR} env var substitution)
 	ComposeContent string `yaml:"-" json:"-"` // Loaded from docker-compose.yaml file
-
-	// Legacy field for backward compatibility
-	ComposeTemplate string `yaml:"compose_template,omitempty" json:"compose_template,omitempty"` // Deprecated: Use ComposeContent
 
 	// User Configuration
 	ConfigOptions []RecipeConfigOption `yaml:"config_options" json:"config_options"`

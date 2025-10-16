@@ -1,7 +1,6 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,20 +8,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 	"github.com/jared-cannon/homelab-orchestration-platform/internal/ssh"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-)
-
-const (
-	// Template execution limits to prevent resource exhaustion attacks
-	templateExecutionTimeout = 10 * time.Second
-	maxTemplateOutputSize    = 1024 * 1024 // 1MB max for docker-compose.yml
 )
 
 // DeploymentService handles deployment operations
@@ -36,6 +27,7 @@ type DeploymentService struct {
 	deviceScorer       *DeviceScorer
 	dbPoolManager      *DatabasePoolManager
 	environmentBuilder *EnvironmentBuilder
+	configValidator    *ConfigValidator
 	deviceLocks        sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
 	cancelFuncs        sync.Map // Map of deployment ID -> context.CancelFunc for cancellation
 }
@@ -71,6 +63,7 @@ func NewDeploymentService(
 		deviceScorer:       NewDeviceScorer(db, sshClient),
 		dbPoolManager:      dbPoolManager,
 		environmentBuilder: NewEnvironmentBuilder(credService, dbPoolManager),
+		configValidator:    NewConfigValidator(),
 	}
 }
 
@@ -170,9 +163,14 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 		return nil, fmt.Errorf("recipe not found: %w", err)
 	}
 
-	// Validate recipe manifest (Requirements, Database config, etc.)
+	// Validate recipe manifest FIRST (before expensive device selection)
 	if err := recipe.Validate(); err != nil {
 		return nil, fmt.Errorf("recipe validation failed: %w", err)
+	}
+
+	// Validate user configuration against recipe requirements
+	if err := s.configValidator.Validate(recipe, req.Config); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
 	}
 
 	// Handle intelligent device selection
@@ -206,16 +204,6 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 		log.Printf("[Deployment] Selected device %s (score: %d) for %s", bestDevice.DeviceName, bestDevice.Score, recipe.Name)
 	} else {
 		deviceID = req.DeviceID
-	}
-
-	// Validate the recipe template before deployment
-	if err := s.validateRecipeTemplate(recipe); err != nil {
-		return nil, fmt.Errorf("invalid recipe template: %w", err)
-	}
-
-	// Validate that all required fields are provided
-	if err := s.validateRequiredFields(recipe, req.Config); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 
 	// Get the device (using intelligently selected deviceID or user-provided)
@@ -649,18 +637,8 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	}
 	s.appendLog(deployment, fmt.Sprintf("✓ Environment variables built (%d vars)", len(envMap)))
 
-	// Get docker-compose content (standard format, no templates)
+	// Get docker-compose content (standard format with ${VAR} substitution via .env file)
 	composeContent := recipe.ComposeContent
-	if composeContent == "" {
-		// Fallback to legacy template rendering if ComposeContent not available
-		s.appendLog(deployment, "Using legacy template rendering (recipe not migrated to new format)")
-		composeContent, err = s.renderComposeTemplate(recipe, deployment, device)
-		if err != nil {
-			s.appendLog(deployment, fmt.Sprintf("❌ Template rendering failed: %v", err))
-			s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to render template: %v", err))
-			return
-		}
-	}
 	s.appendLog(deployment, "✓ Docker Compose prepared")
 
 	// Check for cancellation after template rendering
@@ -680,6 +658,15 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	sanitizedConfig := s.sanitizeConfig(userConfig)
 	deployment.Config, _ = json.Marshal(sanitizedConfig)
 	s.db.Save(deployment)
+
+	// Ensure homelab-proxy network exists (required for Traefik and other proxy-based services)
+	s.appendLog(deployment, "Ensuring Docker networks are ready...")
+	if err := s.ensureProxyNetworkExists(device); err != nil {
+		s.appendLog(deployment, fmt.Sprintf("⚠️  Warning: Failed to ensure proxy network exists: %v", err))
+		// Don't fail deployment, just warn - the network might not be needed
+	} else {
+		s.appendLog(deployment, "✓ Docker network 'homelab-proxy' is ready")
+	}
 
 	// Extract ports from compose
 	portsToOpen := ExtractPortsFromCompose(composeContent)
@@ -761,187 +748,6 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	s.updateStatus(deployment, models.DeploymentStatusRunning, "")
 }
 
-// renderComposeTemplate renders the Docker Compose template with user config
-func (s *DeploymentService) renderComposeTemplate(recipe *models.Recipe, deployment *models.Deployment, device *models.Device) (string, error) {
-	// Parse user config
-	var config map[string]interface{}
-	if err := json.Unmarshal(deployment.Config, &config); err != nil {
-		return "", fmt.Errorf("failed to parse config: %w", err)
-	}
-
-	// Pre-process config: Generate htpasswd hashes if needed
-	if err := s.preprocessConfig(config, device); err != nil {
-		return "", fmt.Errorf("failed to preprocess config: %w", err)
-	}
-
-	// Normalize config keys: Convert snake_case to PascalCase for Go templates
-	// This allows YAML to use natural snake_case while templates use Go conventions
-	normalizedConfig := s.normalizeConfigKeys(config)
-
-	// Add deployment-specific variables
-	normalizedConfig["DEPLOYMENT_ID"] = deployment.ID.String()
-	normalizedConfig["COMPOSE_PROJECT"] = deployment.ComposeProject
-
-	// Parse and execute template with security limits
-	tmpl, err := template.New("compose").Parse(recipe.ComposeTemplate)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	// Execute template with timeout and size limits to prevent resource exhaustion
-	rendered, err := s.executeTemplateWithLimits(tmpl, normalizedConfig)
-	if err != nil {
-		return "", fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	return rendered, nil
-}
-
-// executeTemplateWithLimits executes a template with timeout and size limits to prevent resource exhaustion
-func (s *DeploymentService) executeTemplateWithLimits(tmpl *template.Template, data interface{}) (string, error) {
-	// Create a channel to receive the result or error
-	type result struct {
-		output string
-		err    error
-	}
-	resultChan := make(chan result, 1)
-
-	// Execute template in a goroutine with timeout protection
-	ctx, cancel := context.WithTimeout(context.Background(), templateExecutionTimeout)
-	defer cancel()
-
-	go func() {
-		var buf bytes.Buffer
-		err := tmpl.Execute(&buf, data)
-
-		if err != nil {
-			resultChan <- result{err: err}
-			return
-		}
-
-		output := buf.String()
-
-		// Check output size to prevent memory exhaustion
-		if len(output) > maxTemplateOutputSize {
-			resultChan <- result{
-				err: fmt.Errorf("template output exceeds maximum size of %d bytes (got %d bytes)",
-					maxTemplateOutputSize, len(output)),
-			}
-			return
-		}
-
-		resultChan <- result{output: output}
-	}()
-
-	// Wait for result or timeout
-	select {
-	case res := <-resultChan:
-		if res.err != nil {
-			return "", res.err
-		}
-		return res.output, nil
-	case <-ctx.Done():
-		return "", fmt.Errorf("template execution timed out after %v (possible infinite loop)", templateExecutionTimeout)
-	}
-}
-
-// preprocessConfig handles special config values that need processing before template rendering
-func (s *DeploymentService) preprocessConfig(config map[string]interface{}, device *models.Device) error {
-	// Handle Traefik dashboard password - generate htpasswd hash
-	if username, ok := config["dashboard_username"].(string); ok {
-		if password, ok := config["dashboard_password"].(string); ok && password != "" {
-			hash, err := s.generateHtpasswdHash(device, username, password)
-			if err != nil {
-				return fmt.Errorf("failed to generate password hash: %w", err)
-			}
-			// Add the hash to config for template rendering
-			config["DashboardPasswordHash"] = hash
-			log.Printf("[Deployment] Generated htpasswd hash for user: %s", username)
-		}
-	}
-
-	return nil
-}
-
-// generateHtpasswdHash generates a bcrypt hash compatible with Apache htpasswd format
-// This is done on the backend server, not on the target device, so no SSH or htpasswd binary is needed
-func (s *DeploymentService) generateHtpasswdHash(device *models.Device, username, password string) (string, error) {
-	// Validate username contains no special characters
-	if username == "" || strings.ContainsAny(username, ":$\n\r") {
-		return "", fmt.Errorf("invalid username: must not contain special characters")
-	}
-
-	// Generate bcrypt hash (cost 10 is the default, equivalent to htpasswd -B)
-	// bcrypt is safe for passwords up to 72 bytes
-	if len(password) > 72 {
-		return "", fmt.Errorf("password too long: bcrypt supports maximum 72 bytes")
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate bcrypt hash: %w", err)
-	}
-
-	// Format: username:$2a$10$hash...
-	// Go's bcrypt generates $2a$ format which is compatible with Apache htpasswd and Traefik
-	htpasswdLine := fmt.Sprintf("%s:%s", username, string(hashedPassword))
-
-	// Escape $ as $$ for Docker Compose YAML (Docker Compose uses $$ to represent literal $)
-	htpasswdLine = strings.ReplaceAll(htpasswdLine, "$", "$$")
-
-	log.Printf("[Deployment] Generated htpasswd-compatible bcrypt hash locally (no SSH required)")
-	return htpasswdLine, nil
-}
-
-// validateCredentialInput validates that input doesn't contain dangerous characters
-func (s *DeploymentService) validateCredentialInput(input string) error {
-	// Check for common shell metacharacters that could be used for injection
-	dangerous := []string{";", "|", "&", "$", "`", "\n", "\r", "$(", "${", ">>", "<<"}
-	for _, char := range dangerous {
-		if strings.Contains(input, char) {
-			return fmt.Errorf("input contains forbidden character: %s", char)
-		}
-	}
-	return nil
-}
-
-// shellEscape properly escapes a string for safe use in shell commands
-func (s *DeploymentService) shellEscape(input string) string {
-	// Use single quotes and escape any single quotes in the input
-	// This is the safest approach for arbitrary strings
-	escaped := strings.ReplaceAll(input, "'", "'\"'\"'")
-	return fmt.Sprintf("'%s'", escaped)
-}
-
-// normalizeConfigKeys converts snake_case keys to PascalCase for Go template compatibility
-// Example: dashboard_username -> DashboardUsername, enable_ssl -> EnableSsl
-func (s *DeploymentService) normalizeConfigKeys(config map[string]interface{}) map[string]interface{} {
-	normalized := make(map[string]interface{})
-
-	for key, value := range config {
-		// Convert snake_case to PascalCase
-		pascalKey := s.snakeToPascalCase(key)
-		normalized[pascalKey] = value
-
-		// Also keep original key for backwards compatibility
-		normalized[key] = value
-	}
-
-	return normalized
-}
-
-// snakeToPascalCase converts snake_case to PascalCase
-// Examples: dashboard_username -> DashboardUsername, enable_ssl -> EnableSsl
-func (s *DeploymentService) snakeToPascalCase(input string) string {
-	parts := strings.Split(input, "_")
-	for i, part := range parts {
-		if len(part) > 0 {
-			// Capitalize first letter of each part
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
-		}
-	}
-	return strings.Join(parts, "")
-}
 
 // sanitizeConfig removes sensitive data (passwords, keys, tokens) from config before storage
 func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[string]interface{} {
@@ -974,6 +780,27 @@ func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[st
 	}
 
 	return sanitized
+}
+
+// ensureProxyNetworkExists ensures the homelab-proxy network exists on the target device
+func (s *DeploymentService) ensureProxyNetworkExists(device *models.Device) error {
+	host := fmt.Sprintf("%s:22", device.IPAddress)
+
+	// Check if network exists using Docker's native filtering (more portable than grep)
+	checkCmd := "docker network ls --filter name=^homelab-proxy$ --format '{{.Name}}'"
+	output, err := s.sshClient.ExecuteWithTimeout(host, checkCmd, 10*time.Second)
+
+	// If output is empty or error occurred, network doesn't exist
+	if err != nil || strings.TrimSpace(output) == "" {
+		// Network doesn't exist, create it
+		createCmd := "docker network create homelab-proxy --driver bridge"
+		if _, err := s.sshClient.ExecuteWithTimeout(host, createCmd, 30*time.Second); err != nil {
+			return fmt.Errorf("failed to create homelab-proxy network: %w", err)
+		}
+		log.Printf("[Deployment] Created homelab-proxy network on device %s", device.Name)
+	}
+
+	return nil
 }
 
 // deployToDevice deploys the rendered compose file to the target device (legacy)
@@ -1181,32 +1008,6 @@ func (s *DeploymentService) releaseDeviceLock(deviceID uuid.UUID) {
 	// Could implement lock cleanup after X minutes of inactivity in the future
 }
 
-// validateRequiredFields checks that all required config options are provided
-func (s *DeploymentService) validateRequiredFields(recipe *models.Recipe, config map[string]interface{}) error {
-	var missingFields []string
-
-	for _, option := range recipe.ConfigOptions {
-		if option.Required {
-			value, exists := config[option.Name]
-			if !exists {
-				missingFields = append(missingFields, option.Name)
-			} else {
-				// Check for empty string values
-				if strValue, ok := value.(string); ok && strValue == "" {
-					missingFields = append(missingFields, option.Name)
-				}
-			}
-		}
-	}
-
-	if len(missingFields) > 0 {
-		return fmt.Errorf("missing required fields: %s", strings.Join(missingFields, ", "))
-	}
-
-	log.Printf("[Deployment] All required fields validated for recipe: %s", recipe.Slug)
-	return nil
-}
-
 // TroubleshootDeployment provides detailed troubleshooting information for a deployment
 func (s *DeploymentService) TroubleshootDeployment(id string) (map[string]interface{}, error) {
 	// Get deployment
@@ -1346,42 +1147,5 @@ func (s *DeploymentService) cleanupFirewallPorts(device *models.Device, deletedD
 		log.Printf("[Deployment] All ports still in use by other deployments, skipping cleanup")
 	}
 
-	return nil
-}
-
-// validateRecipeTemplate validates that the recipe template is valid Go template syntax
-func (s *DeploymentService) validateRecipeTemplate(recipe *models.Recipe) error {
-	// Try to parse the template
-	tmpl, err := template.New("validation").Parse(recipe.ComposeTemplate)
-	if err != nil {
-		return fmt.Errorf("template syntax error: %w", err)
-	}
-
-	// Create a dummy config with all required fields
-	dummyConfig := make(map[string]interface{})
-	for _, option := range recipe.ConfigOptions {
-		// Use default values for validation
-		dummyConfig[option.Name] = option.Default
-	}
-
-	// Normalize keys for validation (same as runtime)
-	normalizedDummyConfig := s.normalizeConfigKeys(dummyConfig)
-
-	// Add deployment-specific variables
-	normalizedDummyConfig["DEPLOYMENT_ID"] = "test-id"
-	normalizedDummyConfig["COMPOSE_PROJECT"] = "test-project"
-
-	// Try to execute the template with dummy data using secure execution
-	rendered, err := s.executeTemplateWithLimits(tmpl, normalizedDummyConfig)
-	if err != nil {
-		return fmt.Errorf("template execution error: %w", err)
-	}
-
-	// Basic YAML syntax validation - check for common issues
-	if rendered == "" {
-		return fmt.Errorf("template rendered to empty string")
-	}
-
-	log.Printf("[Deployment] Template validation passed for recipe: %s", recipe.Slug)
 	return nil
 }
