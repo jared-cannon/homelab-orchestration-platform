@@ -89,10 +89,9 @@ config_options:
 
   - name: admin_token
     label: "Admin Panel Token"
-    type: string
-    default: ""
+    type: secret
     required: false
-    description: "Secure token for accessing admin panel (leave empty to disable admin panel)"
+    description: "Admin panel access token (auto-generated if not provided)"
 
   - name: log_level
     label: "Log Level"
