@@ -55,6 +55,13 @@ volumes:
 
 # User-configurable options
 config_options:
+  - name: version
+    label: "NextCloud Version"
+    type: string
+    default: "latest"
+    required: true
+    description: "NextCloud Docker image version (e.g., 'latest', '28', '28.0.1')"
+
   - name: domain
     label: "Domain"
     type: string

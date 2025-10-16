@@ -165,8 +165,12 @@ func (r *RecipeLoader) Validate(recipe *models.Recipe) error {
 		}
 
 		// Validate required fields have defaults
+		// Exception: password and secret types can be required without defaults
+		// because they're either user-provided or auto-generated
 		if opt.Required && opt.Default == nil {
-			return fmt.Errorf("config option %s is required but has no default value", opt.Name)
+			if opt.Type != "password" && opt.Type != "secret" && opt.Type != "api_key" {
+				return fmt.Errorf("config option %s is required but has no default value", opt.Name)
+			}
 		}
 
 		// Track variable names for template validation
@@ -234,6 +238,54 @@ func (r *RecipeLoader) validateComposeTemplate(recipe *models.Recipe) error {
 	return nil
 }
 
+// parseVariableName extracts the variable name from bash-style substitution syntax
+// Handles: ${VAR}, ${VAR:-default}, ${VAR:=default}, ${VAR-default}, ${VAR=default}
+func parseVariableName(raw string) string {
+	varName := strings.TrimSpace(raw)
+
+	// Handle bash parameter expansion with defaults/assignments
+	// ${VAR:-default} - use default if unset or empty
+	// ${VAR:=default} - assign default if unset or empty
+	// ${VAR-default}  - use default if unset
+	// ${VAR=default}  - assign default if unset
+	if idx := strings.IndexAny(varName, ":-=?"); idx != -1 {
+		varName = varName[:idx]
+	}
+
+	return strings.TrimSpace(varName)
+}
+
+// isBuiltInVariable checks if a variable is automatically provided by the deployment system
+func isBuiltInVariable(varName string) bool {
+	// System-provided deployment variables
+	if varName == "DEPLOYMENT_ID" ||
+	   varName == "COMPOSE_PROJECT" ||
+	   varName == "DEVICE_IP" ||
+	   varName == "VERSION" {
+		return true
+	}
+
+	// Database provisioning variables (auto-injected when database.auto_provision = true)
+	if strings.HasPrefix(varName, "POSTGRES_") ||
+	   strings.HasPrefix(varName, "MYSQL_") ||
+	   strings.HasPrefix(varName, "MARIADB_") {
+		return true
+	}
+
+	// Cache provisioning variables (auto-injected when cache.auto_provision = true)
+	if strings.HasPrefix(varName, "REDIS_") ||
+	   strings.HasPrefix(varName, "MEMCACHED_") {
+		return true
+	}
+
+	// Derived variables (generated from config options)
+	if strings.HasSuffix(varName, "_HASH") {
+		return true
+	}
+
+	return false
+}
+
 // validateTemplateVariables checks that template variables are defined in config_options
 func (r *RecipeLoader) validateTemplateVariables(recipe *models.Recipe, configVars map[string]bool) error {
 	// Extract variables from docker-compose content (${VAR_NAME})
@@ -255,16 +307,11 @@ func (r *RecipeLoader) validateTemplateVariables(recipe *models.Recipe, configVa
 		endIdx += idx
 
 		// Extract variable name (remove ${ and })
-		varName := content[idx+2 : endIdx]
-		varName = strings.TrimSpace(varName)
+		rawVar := content[idx+2 : endIdx]
+		varName := parseVariableName(rawVar)
 
 		// Skip built-in deployment variables
-		if varName == "DEPLOYMENT_ID" ||
-			varName == "COMPOSE_PROJECT" ||
-			varName == "DEVICE_IP" ||
-			strings.HasPrefix(varName, "POSTGRES_") ||
-			strings.HasPrefix(varName, "MYSQL_") ||
-			strings.HasPrefix(varName, "REDIS_") {
+		if isBuiltInVariable(varName) {
 			start = endIdx + 1
 			continue
 		}
@@ -274,10 +321,7 @@ func (r *RecipeLoader) validateTemplateVariables(recipe *models.Recipe, configVa
 
 		// Check if variable is defined in config options
 		if !configVars[lowerVarName] {
-			// Allow derived variables like PASSWORD_HASH
-			if !strings.HasSuffix(varName, "_HASH") {
-				return fmt.Errorf("docker-compose variable '%s' is not defined in config_options (expected config option: %s)", varName, lowerVarName)
-			}
+			return fmt.Errorf("docker-compose variable '%s' is not defined in config_options (expected config option: %s)", varName, lowerVarName)
 		}
 
 		start = endIdx + 1
