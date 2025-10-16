@@ -65,7 +65,7 @@ type Recipe struct {
 
 // RecipeMetadata contains metadata about the recipe source and versioning
 type RecipeMetadata struct {
-	Source        string     `json:"source"`         // "local", "coolify", "portainer", etc.
+	Source        string     `json:"source"`         // Recipe source (currently only "local")
 	Version       string     `json:"version"`        // Recipe version
 	LastUpdated   time.Time  `json:"last_updated"`   // When recipe was last updated
 	UpdatedAt     time.Time  `json:"updated_at"`     // When we last fetched it
