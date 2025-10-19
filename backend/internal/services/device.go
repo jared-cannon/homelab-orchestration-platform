@@ -30,23 +30,22 @@ func NewDeviceService(db *gorm.DB, credService *CredentialService, sshClient *ss
 
 // CreateDevice creates a new device and stores its credentials
 func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredentials) error {
-	// Validate IP address or hostname
-	// For Tailscale, allow hostnames (e.g., "machine.tail-scale.ts.net")
-	// For other auth types, require IP addresses for consistency
-	if creds.Type == "tailscale" {
-		if !ValidateHostname(device.IPAddress) {
-			return fmt.Errorf("invalid hostname or IP address: %s", device.IPAddress)
-		}
-	} else {
-		if !ValidateIPAddress(device.IPAddress) {
-			return fmt.Errorf("invalid IP address: %s", device.IPAddress)
+	// Validate local IP address (always required)
+	if !ValidateIPAddress(device.LocalIPAddress) {
+		return fmt.Errorf("invalid local IP address: %s", device.LocalIPAddress)
+	}
+
+	// Validate Tailscale address if provided (can be IP or hostname)
+	if device.TailscaleAddress != "" {
+		if !ValidateHostname(device.TailscaleAddress) && !ValidateIPAddress(device.TailscaleAddress) {
+			return fmt.Errorf("invalid Tailscale address: %s", device.TailscaleAddress)
 		}
 	}
 
-	// Check if device with this IP already exists
+	// Check if device with this local IP already exists
 	var existing models.Device
-	if err := s.db.Where("ip_address = ?", device.IPAddress).First(&existing).Error; err == nil {
-		return fmt.Errorf("device with IP %s already exists", device.IPAddress)
+	if err := s.db.Where("local_ip_address = ?", device.LocalIPAddress).First(&existing).Error; err == nil {
+		return fmt.Errorf("device with local IP %s already exists", device.LocalIPAddress)
 	}
 
 	// Generate UUID for device
@@ -60,7 +59,8 @@ func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredent
 
 	// Store secrets in keychain (only for password/ssh_key types)
 	// For "auto" and "tailscale" types, this is a no-op since no secrets to store
-	if err := s.credService.StoreCredentials(device.ID.String(), creds, device.Name, device.IPAddress); err != nil {
+	primaryAddr := device.GetPrimaryAddress()
+	if err := s.credService.StoreCredentials(device.ID.String(), creds, device.Name, primaryAddr); err != nil {
 		return fmt.Errorf("failed to store credentials: %w", err)
 	}
 
@@ -103,41 +103,57 @@ func (s *DeviceService) ListDevices() ([]models.Device, error) {
 
 // UpdateDevice updates a device
 func (s *DeviceService) UpdateDevice(id uuid.UUID, updates map[string]interface{}) error {
-	// If updating IP address, validate and check for conflicts
-	if newIP, ok := updates["ip_address"]; ok {
+	// Get the current device for validation
+	device, err := s.GetDevice(id)
+	if err != nil {
+		return fmt.Errorf("device not found")
+	}
+
+	// Validate local IP address if being updated
+	if newIP, ok := updates["local_ip_address"]; ok {
 		ipStr, ok := newIP.(string)
 		if !ok {
-			return fmt.Errorf("invalid IP address format")
+			return fmt.Errorf("invalid local IP address format")
 		}
 
-		// Get the current device to check auth type and old IP
-		device, err := s.GetDevice(id)
-		if err != nil {
-			return fmt.Errorf("device not found")
+		if !ValidateIPAddress(ipStr) {
+			return fmt.Errorf("invalid local IP address: %s", ipStr)
 		}
 
-		// Validate IP address or hostname based on auth type
-		if device.AuthType == models.AuthTypeTailscale {
-			if !ValidateHostname(ipStr) {
-				return fmt.Errorf("invalid hostname or IP address: %s", ipStr)
-			}
-		} else {
-			if !ValidateIPAddress(ipStr) {
-				return fmt.Errorf("invalid IP address: %s", ipStr)
-			}
-		}
-
-		// Check if another device already has this IP (excluding current device)
+		// Check if another device already has this local IP (excluding current device)
 		var existing models.Device
-		if err := s.db.Where("ip_address = ? AND id != ?", ipStr, id).First(&existing).Error; err == nil {
-			return fmt.Errorf("device with IP %s already exists", ipStr)
+		if err := s.db.Where("local_ip_address = ? AND id != ?", ipStr, id).First(&existing).Error; err == nil {
+			return fmt.Errorf("device with local IP %s already exists", ipStr)
 		}
 
-		// Close existing SSH connection if IP is changing
-		if s.sshClient != nil && device.IPAddress != ipStr {
-			oldHost := device.IPAddress + ":22"
+		// Close existing SSH connection if local IP is changing
+		if s.sshClient != nil && device.LocalIPAddress != ipStr {
+			oldHost := device.LocalIPAddress + ":22"
 			if err := s.sshClient.Close(oldHost); err == nil {
-				fmt.Printf("[DeviceService] Closed SSH connection to old IP %s after IP update\n", device.IPAddress)
+				fmt.Printf("[DeviceService] Closed SSH connection to old local IP %s after IP update\n", device.LocalIPAddress)
+			}
+		}
+	}
+
+	// Validate Tailscale address if being updated
+	if newTailscale, ok := updates["tailscale_address"]; ok {
+		tailscaleStr, ok := newTailscale.(string)
+		if !ok {
+			return fmt.Errorf("invalid Tailscale address format")
+		}
+
+		// Allow empty string to clear Tailscale address
+		if tailscaleStr != "" {
+			if !ValidateHostname(tailscaleStr) && !ValidateIPAddress(tailscaleStr) {
+				return fmt.Errorf("invalid Tailscale address: %s", tailscaleStr)
+			}
+		}
+
+		// Close existing Tailscale SSH connection if address is changing
+		if s.sshClient != nil && device.TailscaleAddress != "" && device.TailscaleAddress != tailscaleStr {
+			oldHost := device.TailscaleAddress + ":22"
+			if err := s.sshClient.Close(oldHost); err == nil {
+				fmt.Printf("[DeviceService] Closed SSH connection to old Tailscale address %s after update\n", device.TailscaleAddress)
 			}
 		}
 	}
@@ -156,11 +172,14 @@ func (s *DeviceService) DeleteDevice(id uuid.UUID) error {
 		fmt.Printf("Warning: failed to delete credentials: %v\n", err)
 	}
 
-	// Close SSH connection if any
+	// Close SSH connections if any (both local and Tailscale)
 	if s.sshClient != nil {
 		device, err := s.GetDevice(id)
 		if err == nil {
-			s.sshClient.Close(device.IPAddress + ":22")
+			s.sshClient.Close(device.LocalIPAddress + ":22")
+			if device.TailscaleAddress != "" {
+				s.sshClient.Close(device.TailscaleAddress + ":22")
+			}
 		}
 	}
 
@@ -245,7 +264,7 @@ func (s *DeviceService) TestConnectionWithCredentials(ipAddress string, creds *D
 	return result, nil
 }
 
-// TestConnection tests SSH connection and Docker availability
+// TestConnection tests SSH connection and Docker availability with primary/fallback strategy
 func (s *DeviceService) TestConnection(id uuid.UUID) (map[string]interface{}, error) {
 	device, err := s.GetDevice(id)
 	if err != nil {
@@ -258,8 +277,26 @@ func (s *DeviceService) TestConnection(id uuid.UUID) (map[string]interface{}, er
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
 
-	// Use TestConnectionWithCredentials for the actual test
-	result, err := s.TestConnectionWithCredentials(device.IPAddress, creds)
+	// Try primary address first
+	primaryAddr := device.GetPrimaryAddress()
+	result, err := s.TestConnectionWithCredentials(primaryAddr, creds)
+
+	if err != nil {
+		// If primary fails and fallback address exists, try fallback
+		fallbackAddr := device.GetFallbackAddress()
+		if fallbackAddr != "" {
+			fmt.Printf("[DeviceService] Primary connection to %s failed, trying fallback %s\n", primaryAddr, fallbackAddr)
+			result, err = s.TestConnectionWithCredentials(fallbackAddr, creds)
+			if err == nil {
+				result["connection_used"] = "fallback"
+				result["fallback_address"] = fallbackAddr
+			}
+		}
+	} else {
+		result["connection_used"] = "primary"
+		result["primary_address"] = primaryAddr
+	}
+
 	if err != nil {
 		return result, err
 	}
@@ -340,11 +377,18 @@ func (s *DeviceService) UpdateDeviceCredentials(id uuid.UUID, creds *DeviceCrede
 		return err
 	}
 
-	// Close existing SSH connection to force reconnection with new credentials
+	// Close existing SSH connections to force reconnection with new credentials (both local and Tailscale)
 	if s.sshClient != nil {
-		host := device.IPAddress + ":22"
-		if err := s.sshClient.Close(host); err == nil {
-			fmt.Printf("[DeviceService] Closed existing SSH connection to %s after credential update\n", device.Name)
+		localHost := device.LocalIPAddress + ":22"
+		if err := s.sshClient.Close(localHost); err == nil {
+			fmt.Printf("[DeviceService] Closed existing SSH connection to %s (local) after credential update\n", device.Name)
+		}
+
+		if device.TailscaleAddress != "" {
+			tailscaleHost := device.TailscaleAddress + ":22"
+			if err := s.sshClient.Close(tailscaleHost); err == nil {
+				fmt.Printf("[DeviceService] Closed existing SSH connection to %s (Tailscale) after credential update\n", device.Name)
+			}
 		}
 	}
 
@@ -367,7 +411,8 @@ func (s *DeviceService) UpdateDeviceCredentials(id uuid.UUID, creds *DeviceCrede
 
 	// Update secrets in keychain (only for password/ssh_key types)
 	// For "auto" type, this is a no-op
-	if err := s.credService.StoreCredentials(id.String(), creds, device.Name, device.IPAddress); err != nil {
+	primaryAddr := device.GetPrimaryAddress()
+	if err := s.credService.StoreCredentials(id.String(), creds, device.Name, primaryAddr); err != nil {
 		return fmt.Errorf("failed to update credentials: %w", err)
 	}
 

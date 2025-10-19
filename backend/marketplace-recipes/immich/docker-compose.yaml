@@ -1,0 +1,127 @@
+# Immich - Self-hosted Google Photos Alternative
+# Standard Docker Compose format with environment variable substitution
+# Compatible with docker-compose CLI for local testing
+
+services:
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v1.94.1
+    container_name: immich_server
+    restart: unless-stopped
+
+    environment:
+      # Database connection (auto-provisioned by our system)
+      - DB_HOSTNAME=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE_NAME=${DB_DATABASE}
+
+      # Redis connection (auto-provisioned by our system)
+      - REDIS_HOSTNAME=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+
+      # Immich configuration
+      - UPLOAD_LOCATION=${UPLOAD_LOCATION}
+      - IMMICH_WEB_URL=https://${DOMAIN}
+      - IMMICH_SERVER_URL=https://${DOMAIN}
+      - PUBLIC_IMMICH_SERVER_URL=https://${DOMAIN}
+
+      # Machine learning
+      - IMMICH_MACHINE_LEARNING_ENABLED=${ENABLE_MACHINE_LEARNING}
+      - IMMICH_MACHINE_LEARNING_URL=http://immich-machine-learning:3003
+
+    volumes:
+      - ${UPLOAD_LOCATION}:/usr/src/app/upload
+      - /etc/localtime:/etc/localtime:ro
+
+    ports:
+      - "${PORT}:3001"
+
+    depends_on:
+      - immich-machine-learning
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/api/server-info/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    labels:
+      # Traefik labels for automatic reverse proxy configuration
+      - "traefik.enable=true"
+      - "traefik.http.routers.immich.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.immich.entrypoints=websecure"
+      - "traefik.http.routers.immich.tls=true"
+      - "traefik.http.routers.immich.tls.certresolver=letsencrypt"
+      - "traefik.http.services.immich.loadbalancer.server.port=3001"
+
+      # Metadata for our orchestration system
+      - "homelab.app=immich"
+      - "homelab.category=media"
+      - "homelab.backup=true"
+      - "homelab.backup.priority=high"
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:v1.94.1
+    container_name: immich_machine_learning
+    restart: unless-stopped
+
+    environment:
+      - UPLOAD_LOCATION=${UPLOAD_LOCATION}
+
+    volumes:
+      - ${UPLOAD_LOCATION}:/usr/src/app/upload
+      - immich-model-cache:/cache
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3003/ping || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional: Immich proxy for better performance
+  immich-proxy:
+    image: ghcr.io/immich-app/immich-proxy:v1.94.1
+    container_name: immich_proxy
+    restart: unless-stopped
+
+    environment:
+      - IMMICH_SERVER_URL=http://immich-server:3001
+      - IMMICH_WEB_URL=http://immich-web:3000
+
+    ports:
+      - "2283:8080"
+
+    depends_on:
+      - immich-server
+      - immich-web
+
+    labels:
+      # Alternative Traefik routing through proxy
+      - "traefik.enable=false"  # Disabled by default, prefer direct server access
+
+  immich-web:
+    image: ghcr.io/immich-app/immich-web:v1.94.1
+    container_name: immich_web
+    restart: unless-stopped
+
+    environment:
+      - PUBLIC_IMMICH_SERVER_URL=https://${DOMAIN}
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  immich-model-cache:
+    driver: local
+    labels:
+      - "homelab.app=immich"
+      - "homelab.volume=model-cache"
+      - "homelab.backup=false"  # Model cache doesn't need backup

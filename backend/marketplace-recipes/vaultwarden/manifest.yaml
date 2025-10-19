@@ -5,6 +5,14 @@ category: security
 tagline: "Self-hosted password manager"
 description: "Self-hosted Bitwarden-compatible password manager. Lightweight, secure, and feature-complete. Perfect for managing passwords across all your devices without monthly fees. Requires HTTPS for security."
 
+# SaaS Replacements
+saas_replacements:
+  - name: "1Password"
+    comparison_url: "https://github.com/dani-garcia/vaultwarden"
+  - name: "LastPass"
+  - name: "Dashlane"
+  - name: "Bitwarden (Cloud)"
+
 icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/vaultwarden.png"
 author: "Daniel García"
 website: "https://github.com/dani-garcia/vaultwarden"

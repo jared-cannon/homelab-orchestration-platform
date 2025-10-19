@@ -107,7 +107,7 @@ export function DeviceHealthCard({ device }: DeviceHealthCardProps) {
           : '⚠️ Docker not installed'
 
         toast.success('Connection successful!', {
-          description: `Connected to ${device.ip_address}. ${dockerInfo}`
+          description: `Connected to ${device.local_ip_address}. ${dockerInfo}`
         })
       }
     } catch (error) {
@@ -131,7 +131,7 @@ export function DeviceHealthCard({ device }: DeviceHealthCardProps) {
               </div>
               <div>
                 <h3 className="font-semibold text-base">{device.name}</h3>
-                <p className="text-sm text-muted-foreground font-mono">{device.ip_address}</p>
+                <p className="text-sm text-muted-foreground font-mono">{device.local_ip_address}</p>
               </div>
             </div>
 

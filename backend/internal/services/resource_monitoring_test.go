@@ -233,7 +233,7 @@ func TestUpdateDeviceMetrics(t *testing.T) {
 		ID:        uuid.New(),
 		Name:      "Test Device",
 		Type:      models.DeviceTypeServer,
-		IPAddress: "192.168.1.100",
+		LocalIPAddress: "192.168.1.100",
 		Status:    models.DeviceStatusOnline,
 		Username:  "admin",
 		AuthType:  models.AuthTypeAuto,

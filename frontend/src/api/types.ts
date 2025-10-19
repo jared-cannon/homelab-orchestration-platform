@@ -4,7 +4,7 @@
 import type { Device, DeviceType } from './generated-types'
 
 // Re-export core types from generated-types for convenience
-export type { Device, DeviceType, DeviceStatus, Application, Deployment, DeploymentStatus } from './generated-types'
+export type { Device, DeviceType, DeviceStatus, PrimaryConnection, Application, Deployment, DeploymentStatus } from './generated-types'
 
 export interface DeviceCredentials {
   type: 'auto' | 'password' | 'ssh_key' | 'tailscale'
@@ -17,7 +17,9 @@ export interface DeviceCredentials {
 export interface CreateDeviceRequest {
   name: string
   type: DeviceType
-  ip_address: string
+  local_ip_address: string
+  tailscale_address?: string
+  primary_connection?: 'local' | 'tailscale'
   mac_address?: string
   metadata?: string
   credentials: DeviceCredentials
@@ -26,6 +28,9 @@ export interface CreateDeviceRequest {
 export interface UpdateDeviceRequest {
   name?: string
   type?: DeviceType
+  local_ip_address?: string
+  tailscale_address?: string
+  primary_connection?: 'local' | 'tailscale'
   mac_address?: string
   metadata?: string
 }
@@ -241,7 +246,7 @@ export interface RecipeResources {
 export interface RecipeConfigOption {
   name: string
   label: string
-  type: 'string' | 'number' | 'boolean'
+  type: 'string' | 'number' | 'boolean' | 'password' | 'secret'
   default: string | number | boolean
   required: boolean
   description: string
@@ -294,4 +299,65 @@ export interface CreateDeploymentRequest {
   recipe_slug: string
   device_id: string
   config: Record<string, any>
+}
+
+// Curated Marketplace types
+export interface SaaSReplacement {
+  name: string
+  comparison_url?: string
+}
+
+export interface CuratedRecipe extends Recipe {
+  saas_replacements?: SaaSReplacement[]
+  difficulty_level?: 'beginner' | 'intermediate' | 'advanced'
+  setup_time_minutes?: number
+  feature_highlights?: string[]
+}
+
+export interface DeploymentInfo {
+  status: string
+  device_name: string
+  access_url?: string
+  deployed_at?: string
+}
+
+export interface CuratedMarketplaceStats {
+  total_curated: number
+  deployed: number
+  percentage: number
+}
+
+export interface CuratedMarketplaceResponse {
+  recipes: CuratedRecipe[]
+  user_deployments: Record<string, DeploymentInfo>
+  stats: CuratedMarketplaceStats
+}
+
+// Dependency Check types
+export interface DependencyToProvision {
+  type: string
+  name?: string
+  engine?: string
+  purpose?: string
+  message?: string
+  estimated_time_seconds?: number
+  estimated_ram_mb?: number
+  estimated_storage_gb?: number
+}
+
+export interface MissingDependency {
+  type: string
+  name?: string
+  engine?: string
+  purpose?: string
+  message?: string
+}
+
+export interface DependencyCheckResult {
+  satisfied: boolean
+  missing: MissingDependency[]
+  to_provision: DependencyToProvision[]
+  total_estimated_time_seconds: number
+  total_estimated_ram_mb: number
+  total_estimated_storage_gb: number
 }

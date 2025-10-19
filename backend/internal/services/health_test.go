@@ -145,7 +145,7 @@ func TestHealthCheckService_BroadcastsStatusChanges(t *testing.T) {
 		ID:        uuid.New(),
 		Name:      "test-device",
 		Type:      models.DeviceTypeServer,
-		IPAddress: "192.168.1.100",
+		LocalIPAddress: "192.168.1.100",
 		Status:    models.DeviceStatusUnknown,
 		AuthType:  models.AuthTypeAuto,
 	}
@@ -187,7 +187,7 @@ func TestHealthCheckService_HandlesMissingDeviceService(t *testing.T) {
 		ID:        uuid.New(),
 		Name:      "test-device",
 		Type:      models.DeviceTypeServer,
-		IPAddress: "192.168.1.100",
+		LocalIPAddress: "192.168.1.100",
 		Status:    models.DeviceStatusUnknown,
 		AuthType:  models.AuthTypeAuto,
 	}
@@ -226,7 +226,7 @@ func TestHealthCheckService_ContextCancellation(t *testing.T) {
 			ID:        uuid.New(),
 			Name:      "test-device-" + string(rune(i)),
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.10" + string(rune(i)),
+			LocalIPAddress: "192.168.1.10" + string(rune(i)),
 			Status:    models.DeviceStatusUnknown,
 			AuthType:  models.AuthTypeAuto,
 		}

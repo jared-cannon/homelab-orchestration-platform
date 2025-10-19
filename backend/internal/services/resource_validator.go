@@ -36,7 +36,7 @@ type ResourceStatus struct {
 
 // CheckResources checks available resources on a device
 func (rv *ResourceValidator) CheckResources(device *models.Device) (*ResourceStatus, error) {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	resources := &ResourceStatus{
 		UsedPorts: []int{},

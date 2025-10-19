@@ -1,6 +1,10 @@
 package services
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
+)
 
 func TestParseVariableName(t *testing.T) {
 	tests := []struct {
@@ -32,6 +36,10 @@ func TestParseVariableName(t *testing.T) {
 }
 
 func TestIsBuiltInVariable(t *testing.T) {
+	// Create a minimal recipe for testing (no auto-provisioning configured)
+	// Legacy database/cache prefixes will still be recognized as built-in
+	recipe := &models.Recipe{}
+
 	tests := []struct {
 		name     string
 		varName  string
@@ -72,9 +80,9 @@ func TestIsBuiltInVariable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isBuiltInVariable(tt.varName)
+			result := isBuiltInVariable(tt.varName, recipe)
 			if result != tt.expected {
-				t.Errorf("isBuiltInVariable(%q) = %v, expected %v", tt.varName, result, tt.expected)
+				t.Errorf("isBuiltInVariable(%q, recipe) = %v, expected %v", tt.varName, result, tt.expected)
 			}
 		})
 	}

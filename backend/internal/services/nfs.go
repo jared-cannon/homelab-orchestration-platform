@@ -34,7 +34,7 @@ func (s *NFSService) SetupServer(deviceID uuid.UUID, exportPath, clientCIDR, opt
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[NFS] Setting up NFS server on %s", device.Name)
 
@@ -154,7 +154,7 @@ func (s *NFSService) RemoveExport(deviceID uuid.UUID, exportID uuid.UUID) error 
 		return err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[NFS] Removing export %s from %s", export.Path, device.Name)
 
@@ -187,7 +187,7 @@ func (s *NFSService) MountShare(deviceID uuid.UUID, serverIP, remotePath, localP
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[NFS] Mounting NFS share on %s: %s:%s -> %s", device.Name, serverIP, remotePath, localPath)
 
@@ -312,7 +312,7 @@ func (s *NFSService) UnmountShare(deviceID uuid.UUID, mountID uuid.UUID, removeF
 		return err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[NFS] Unmounting %s from %s", mount.LocalPath, device.Name)
 

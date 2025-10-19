@@ -176,13 +176,21 @@ export const AuthTypePassword: AuthType = "password"; // Password authentication
 export const AuthTypeSSHKey: AuthType = "ssh_key"; // SSH key authentication
 export const AuthTypeTailscale: AuthType = "tailscale"; // Tailscale SSH (uses Tailscale's built-in SSH)
 /**
+ * PrimaryConnection represents which connection type to use first
+ */
+export type PrimaryConnection = string;
+export const PrimaryConnectionLocal: PrimaryConnection = "local"; // Use local IP address first
+export const PrimaryConnectionTailscale: PrimaryConnection = "tailscale"; // Use Tailscale address first
+/**
  * Device represents a managed device (server, router, NAS, etc.)
  */
 export interface Device {
   id: string;
   name: string;
   type: DeviceType;
-  ip_address: string;
+  local_ip_address: string;
+  tailscale_address?: string;
+  primary_connection: PrimaryConnection;
   mac_address?: string;
   status: DeviceStatus;
   username: string; // SSH username (not sensitive)

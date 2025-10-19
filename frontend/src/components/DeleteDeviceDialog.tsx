@@ -80,7 +80,7 @@ export function DeleteDeviceDialog({ device, open, onOpenChange }: DeleteDeviceD
             <p className="text-sm font-medium mb-2">You are about to delete:</p>
             <div className="space-y-1 text-sm">
               <p><span className="text-muted-foreground">Name:</span> <span className="font-semibold">{device.name}</span></p>
-              <p><span className="text-muted-foreground">IP:</span> <span className="font-mono">{device.ip_address}</span></p>
+              <p><span className="text-muted-foreground">IP:</span> <span className="font-mono">{device.local_ip_address}</span></p>
               <p><span className="text-muted-foreground">Type:</span> <span className="capitalize">{device.type}</span></p>
             </div>
           </div>

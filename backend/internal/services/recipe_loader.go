@@ -256,7 +256,7 @@ func parseVariableName(raw string) string {
 }
 
 // isBuiltInVariable checks if a variable is automatically provided by the deployment system
-func isBuiltInVariable(varName string) bool {
+func isBuiltInVariable(varName string, recipe *models.Recipe) bool {
 	// System-provided deployment variables
 	if varName == "DEPLOYMENT_ID" ||
 	   varName == "COMPOSE_PROJECT" ||
@@ -266,6 +266,27 @@ func isBuiltInVariable(varName string) bool {
 	}
 
 	// Database provisioning variables (auto-injected when database.auto_provision = true)
+	if recipe.Database.AutoProvision && recipe.Database.Engine != "" && recipe.Database.Engine != "none" {
+		// Use custom env_prefix if specified, otherwise use engine-specific prefix
+		prefix := recipe.Database.EnvPrefix
+		if prefix == "" {
+			// Default to engine-specific prefix
+			switch recipe.Database.Engine {
+			case "postgres":
+				prefix = "POSTGRES_"
+			case "mysql":
+				prefix = "MYSQL_"
+			case "mariadb":
+				prefix = "MARIADB_"
+			}
+		}
+
+		if prefix != "" && strings.HasPrefix(varName, prefix) {
+			return true
+		}
+	}
+
+	// Legacy database prefixes for backward compatibility
 	if strings.HasPrefix(varName, "POSTGRES_") ||
 	   strings.HasPrefix(varName, "MYSQL_") ||
 	   strings.HasPrefix(varName, "MARIADB_") {
@@ -273,6 +294,25 @@ func isBuiltInVariable(varName string) bool {
 	}
 
 	// Cache provisioning variables (auto-injected when cache.auto_provision = true)
+	if recipe.Cache.AutoProvision && recipe.Cache.Engine != "" && recipe.Cache.Engine != "none" {
+		// Use custom env_prefix if specified, otherwise use engine-specific prefix
+		prefix := recipe.Cache.EnvPrefix
+		if prefix == "" {
+			// Default to engine-specific prefix
+			switch recipe.Cache.Engine {
+			case "redis":
+				prefix = "REDIS_"
+			case "memcached":
+				prefix = "MEMCACHED_"
+			}
+		}
+
+		if prefix != "" && strings.HasPrefix(varName, prefix) {
+			return true
+		}
+	}
+
+	// Legacy cache prefixes for backward compatibility
 	if strings.HasPrefix(varName, "REDIS_") ||
 	   strings.HasPrefix(varName, "MEMCACHED_") {
 		return true
@@ -310,8 +350,8 @@ func (r *RecipeLoader) validateTemplateVariables(recipe *models.Recipe, configVa
 		rawVar := content[idx+2 : endIdx]
 		varName := parseVariableName(rawVar)
 
-		// Skip built-in deployment variables
-		if isBuiltInVariable(varName) {
+		// Skip built-in deployment variables (pass recipe for context-aware validation)
+		if isBuiltInVariable(varName, recipe) {
 			start = endIdx + 1
 			continue
 		}

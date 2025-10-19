@@ -362,6 +362,14 @@ class APIClient {
     )
   }
 
+  async getCuratedMarketplace(): Promise<import('./types').CuratedMarketplaceResponse> {
+    return this.request<import('./types').CuratedMarketplaceResponse>('/marketplace/curated')
+  }
+
+  async checkRecipeDependencies(recipeSlug: string, deviceId: string): Promise<import('./types').DependencyCheckResult> {
+    return this.request<import('./types').DependencyCheckResult>(`/deployments/check-dependencies/${recipeSlug}/${deviceId}`)
+  }
+
   // Deployment API
   async createDeployment(data: CreateDeploymentRequest): Promise<Deployment> {
     return this.request<Deployment>('/deployments', {

@@ -5,6 +5,14 @@ category: monitoring
 tagline: "Self-hosted uptime monitoring tool"
 description: "Beautiful and easy-to-use uptime monitoring tool. Monitor HTTP(s), TCP, Ping, DNS, and more. Get notified when your services go down via Telegram, Discord, Slack, email, and 90+ notification services. Perfect for monitoring your entire homelab infrastructure."
 
+# SaaS Replacements
+saas_replacements:
+  - name: "UptimeRobot"
+    comparison_url: "https://uptime.kuma.pet"
+  - name: "Pingdom"
+  - name: "StatusCake"
+  - name: "Better Uptime"
+
 icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/uptime-kuma.png"
 author: "Louis Lam"
 website: "https://uptime.kuma.pet"

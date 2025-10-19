@@ -50,6 +50,17 @@ type Recipe struct {
 	// Update configuration
 	Updates RecipeUpdateConfig `yaml:"updates" json:"updates"`
 
+	// Curated Marketplace Features (NEW)
+	SaaSReplacements  []SaaSReplacement `yaml:"saas_replacements,omitempty" json:"saas_replacements,omitempty"`
+	DifficultyLevel   string            `yaml:"difficulty_level,omitempty" json:"difficulty_level,omitempty"`     // "beginner", "intermediate", "advanced"
+	SetupTimeMinutes  int               `yaml:"setup_time_minutes,omitempty" json:"setup_time_minutes,omitempty"` // Estimated setup time
+	FeatureHighlights []string          `yaml:"feature_highlights,omitempty" json:"feature_highlights,omitempty"` // Key features for comparison tables
+	IsInfrastructure  bool              `yaml:"is_infrastructure,omitempty" json:"is_infrastructure,omitempty"`   // Infrastructure template (e.g., laravel-app-server)
+	ServerType        string            `yaml:"server_type,omitempty" json:"server_type,omitempty"`               // "app_server", "web_server", "database_server", "worker_server", "cache_server"
+
+	// Dependency Auto-Provisioning (NEW)
+	Dependencies RecipeDependencies `yaml:"dependencies,omitempty" json:"dependencies,omitempty"`
+
 	// Legacy field
 	PostDeployInstructions string `yaml:"post_deploy_instructions,omitempty" json:"post_deploy_instructions,omitempty"`
 
@@ -133,9 +144,10 @@ type RecipeDatabaseConfig struct {
 
 // RecipeCacheConfig defines cache provisioning configuration
 type RecipeCacheConfig struct {
-	Engine        string `yaml:"engine" json:"engine"`                 // "redis", "memcached", "none"
-	AutoProvision bool   `yaml:"auto_provision" json:"auto_provision"` // Enable automatic cache provisioning
-	Version       string `yaml:"version,omitempty" json:"version"`     // Cache version
+	Engine        string `yaml:"engine" json:"engine"`                               // "redis", "memcached", "none"
+	AutoProvision bool   `yaml:"auto_provision" json:"auto_provision"`               // Enable automatic cache provisioning
+	Version       string `yaml:"version,omitempty" json:"version"`                   // Cache version
+	EnvPrefix     string `yaml:"env_prefix,omitempty" json:"env_prefix,omitempty"`   // Prefix for env vars (default: "REDIS_" or "MEMCACHED_")
 }
 
 // RecipeVolumeConfig defines volume configuration
@@ -168,6 +180,34 @@ type RecipeUpdateConfig struct {
 	Strategy            string `yaml:"strategy" json:"strategy"`                           // "automatic", "manual", "notify"
 	BackupBeforeUpdate  bool   `yaml:"backup_before_update" json:"backup_before_update"`   // Create backup before updating
 	RollbackOnFailure   bool   `yaml:"rollback_on_failure" json:"rollback_on_failure"`     // Auto-rollback if update fails
+}
+
+// SaaSReplacement defines which SaaS service this recipe replaces
+type SaaSReplacement struct {
+	Name           string `yaml:"name" json:"name"`                         // e.g., "Google Photos"
+	ComparisonURL  string `yaml:"comparison_url,omitempty" json:"comparison_url,omitempty"` // URL to comparison guide
+}
+
+// RecipeDependencies defines required and recommended dependencies
+type RecipeDependencies struct {
+	Required    []RecipeDependency `yaml:"required,omitempty" json:"required,omitempty"`
+	Recommended []RecipeDependency `yaml:"recommended,omitempty" json:"recommended,omitempty"`
+}
+
+// RecipeDependency represents a single dependency
+type RecipeDependency struct {
+	Type          string   `yaml:"type" json:"type"`                                   // "reverse_proxy", "database", "cache", "application", "infrastructure"
+	Name          string   `yaml:"name,omitempty" json:"name,omitempty"`               // Specific app name (for application dependencies)
+	Engine        string   `yaml:"engine,omitempty" json:"engine,omitempty"`           // Database/cache engine (for database/cache dependencies)
+	MinVersion    string   `yaml:"min_version,omitempty" json:"min_version,omitempty"` // Minimum version required
+	Prefer        string   `yaml:"prefer,omitempty" json:"prefer,omitempty"`           // Preferred option (e.g., "traefik")
+	Alternatives  []string `yaml:"alternatives,omitempty" json:"alternatives,omitempty"` // Alternative options
+	Shared        bool     `yaml:"shared,omitempty" json:"shared,omitempty"`           // Use shared instance (default true for DB/cache)
+	AutoProvision bool     `yaml:"auto_provision,omitempty" json:"auto_provision,omitempty"` // Auto-provision if missing (default true)
+	AutoConfigure bool     `yaml:"auto_configure,omitempty" json:"auto_configure,omitempty"` // Auto-configure connection
+	Purpose       string   `yaml:"purpose,omitempty" json:"purpose,omitempty"`         // Human-readable purpose
+	Message       string   `yaml:"message,omitempty" json:"message,omitempty"`         // Custom message to show user
+	ForVolumes    []string `yaml:"for_volumes,omitempty" json:"for_volumes,omitempty"` // Volumes to backup (for backup dependencies)
 }
 
 // Validate checks if the recipe configuration is valid
@@ -241,6 +281,16 @@ func (r *Recipe) Validate() error {
 		return fmt.Errorf("cache config: %w", err)
 	}
 
+	// Validate curated marketplace fields
+	if err := r.ValidateMarketplaceFields(); err != nil {
+		return fmt.Errorf("marketplace fields: %w", err)
+	}
+
+	// Validate dependencies
+	if err := r.ValidateDependencies(); err != nil {
+		return fmt.Errorf("dependencies: %w", err)
+	}
+
 	return nil
 }
 
@@ -289,7 +339,249 @@ func (r *Recipe) ValidateCacheConfig() error {
 	return nil
 }
 
+// ValidateMarketplaceFields validates curated marketplace fields
+func (r *Recipe) ValidateMarketplaceFields() error {
+	// Validate difficulty level
+	if r.DifficultyLevel != "" {
+		validLevels := []string{"beginner", "intermediate", "advanced"}
+		if !contains(validLevels, r.DifficultyLevel) {
+			return fmt.Errorf("invalid difficulty_level: %s (must be 'beginner', 'intermediate', or 'advanced')", r.DifficultyLevel)
+		}
+	}
+
+	// Validate setup time
+	if r.SetupTimeMinutes < 0 {
+		return fmt.Errorf("setup_time_minutes cannot be negative: %d", r.SetupTimeMinutes)
+	}
+
+	// Validate server type (for infrastructure recipes)
+	if r.ServerType != "" {
+		validTypes := []string{"app_server", "web_server", "database_server", "worker_server", "cache_server"}
+		if !contains(validTypes, r.ServerType) {
+			return fmt.Errorf("invalid server_type: %s (must be one of: %s)", r.ServerType, strings.Join(validTypes, ", "))
+		}
+	}
+
+	// If infrastructure recipe, server_type must be specified
+	if r.IsInfrastructure && r.ServerType == "" {
+		return fmt.Errorf("infrastructure recipes must specify server_type")
+	}
+
+	return nil
+}
+
+// ValidateDependencies validates dependency configuration
+func (r *Recipe) ValidateDependencies() error {
+	// Validate required dependencies
+	for i, dep := range r.Dependencies.Required {
+		if err := validateDependency(dep); err != nil {
+			return fmt.Errorf("required dependency %d: %w", i, err)
+		}
+	}
+
+	// Validate recommended dependencies
+	for i, dep := range r.Dependencies.Recommended {
+		if err := validateDependency(dep); err != nil {
+			return fmt.Errorf("recommended dependency %d: %w", i, err)
+		}
+	}
+
+	return nil
+}
+
+// validateDependency validates a single dependency configuration
+func validateDependency(dep RecipeDependency) error {
+	// Type is required
+	if dep.Type == "" {
+		return fmt.Errorf("dependency type is required")
+	}
+
+	// Validate dependency type
+	validTypes := []string{"reverse_proxy", "database", "cache", "application", "infrastructure", "backup"}
+	if !contains(validTypes, dep.Type) {
+		return fmt.Errorf("invalid dependency type: %s (must be one of: %s)", dep.Type, strings.Join(validTypes, ", "))
+	}
+
+	// Type-specific validation
+	switch dep.Type {
+	case "database":
+		if dep.Engine == "" && dep.Name == "" {
+			return fmt.Errorf("database dependency must specify either engine or name")
+		}
+		if dep.Engine != "" {
+			validEngines := []string{"postgres", "mysql", "mariadb", "sqlite"}
+			if !contains(validEngines, dep.Engine) {
+				return fmt.Errorf("invalid database engine: %s (must be one of: %s)", dep.Engine, strings.Join(validEngines, ", "))
+			}
+		}
+
+	case "cache":
+		if dep.Engine == "" && dep.Name == "" {
+			return fmt.Errorf("cache dependency must specify either engine or name")
+		}
+		if dep.Engine != "" {
+			validEngines := []string{"redis", "memcached"}
+			if !contains(validEngines, dep.Engine) {
+				return fmt.Errorf("invalid cache engine: %s (must be one of: %s)", dep.Engine, strings.Join(validEngines, ", "))
+			}
+		}
+
+	case "reverse_proxy":
+		if dep.Prefer == "" && len(dep.Alternatives) == 0 && dep.Name == "" {
+			return fmt.Errorf("reverse_proxy dependency must specify prefer, alternatives, or name")
+		}
+
+	case "application", "infrastructure":
+		if dep.Name == "" {
+			return fmt.Errorf("%s dependency must specify name", dep.Type)
+		}
+
+	case "backup":
+		// Backup dependencies are optional and don't require specific fields
+	}
+
+	return nil
+}
+
+// CalculateQualityScore computes a quality score (0-100) based on various factors
+// This follows DRY principle by centralizing the scoring logic
+func (r *Recipe) CalculateQualityScore() int {
+	score := 0
+
+	// GitHub stars from metadata (0-30 points, capped at 30k stars)
+	if r.Metadata.QualityScore > 0 {
+		// If already calculated externally, use it
+		return r.Metadata.QualityScore
+	}
+
+	// Recency (0-20 points, based on last 6 months)
+	if !r.Metadata.LastUpdated.IsZero() {
+		daysSinceUpdate := int(time.Since(r.Metadata.LastUpdated).Hours() / 24)
+		if daysSinceUpdate < 180 {
+			score += int((180 - float64(daysSinceUpdate)) * 20 / 180)
+		}
+	} else {
+		// If no update info, give partial credit
+		score += 10
+	}
+
+	// Deployment success rate (0-15 points)
+	score += int(r.Metadata.SuccessRate * 15)
+
+	// Metadata completeness (0-10 points)
+	completeness := 0
+	if r.Description != "" {
+		completeness += 2
+	}
+	if r.IconURL != "" {
+		completeness += 2
+	}
+	if len(r.FeatureHighlights) >= 3 {
+		completeness += 3
+	}
+	if len(r.SaaSReplacements) > 0 {
+		completeness += 3
+	}
+	score += completeness
+
+	// Difficulty bonus (0-5 points, easier = higher score for general users)
+	switch r.DifficultyLevel {
+	case "beginner":
+		score += 5
+	case "intermediate":
+		score += 3
+	case "advanced":
+		score += 1
+	}
+
+	// Cap at 100
+	if score > 100 {
+		score = 100
+	}
+
+	return score
+}
+
+// GetEstimatedRAMMB returns the minimum RAM requirement in MB
+// Supports both new Requirements format and legacy Resources format
+func (r *Recipe) GetEstimatedRAMMB() int {
+	// Try new format first
+	if r.Requirements.Memory.Minimum != "" {
+		mb := parseMemoryString(r.Requirements.Memory.Minimum)
+		if mb > 0 {
+			return mb
+		}
+	}
+
+	// Fall back to legacy format
+	if r.Resources.MinRAMMB > 0 {
+		return r.Resources.MinRAMMB
+	}
+
+	return 512 // Default minimum
+}
+
+// GetEstimatedStorageGB returns the minimum storage requirement in GB
+func (r *Recipe) GetEstimatedStorageGB() int {
+	// Try new format first
+	if r.Requirements.Storage.Minimum != "" {
+		gb := parseStorageString(r.Requirements.Storage.Minimum)
+		if gb > 0 {
+			return gb
+		}
+	}
+
+	// Fall back to legacy format
+	if r.Resources.MinStorageGB > 0 {
+		return r.Resources.MinStorageGB
+	}
+
+	return 1 // Default minimum
+}
+
 // Helper functions
+
+// parseMemoryString converts memory string like "512MB" or "1GB" to MB
+func parseMemoryString(s string) int {
+	if s == "" {
+		return 0
+	}
+
+	// Extract number and unit
+	var value int
+	var unit string
+	fmt.Sscanf(s, "%d%s", &value, &unit)
+
+	switch strings.ToUpper(unit) {
+	case "GB":
+		return value * 1024
+	case "MB":
+		return value
+	default:
+		return 0
+	}
+}
+
+// parseStorageString converts storage string like "1GB" or "1TB" to GB
+func parseStorageString(s string) int {
+	if s == "" {
+		return 0
+	}
+
+	// Extract number and unit
+	var value int
+	var unit string
+	fmt.Sscanf(s, "%d%s", &value, &unit)
+
+	switch strings.ToUpper(unit) {
+	case "TB":
+		return value * 1024
+	case "GB":
+		return value
+	default:
+		return 0
+	}
+}
 
 func isValidMemoryString(s string) bool {
 	// Match formats like "512MB", "1GB", "2048MB"

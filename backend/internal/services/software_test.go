@@ -81,11 +81,11 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Docker is installed
 		mockSSH.SetResponse(host, "docker --version", "Docker version 24.0.0, build abc123", nil)
@@ -122,7 +122,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.101",
+			LocalIPAddress: "192.168.1.101",
 		}
 		db.Create(device)
 
@@ -172,7 +172,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.102",
+			LocalIPAddress: "192.168.1.102",
 		}
 		db.Create(device)
 
@@ -185,7 +185,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		}
 		db.Create(oldDocker)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Docker is installed with new version
 		mockSSH.SetResponse(host, "docker --version", "Docker version 24.0.0, build new456", nil)
@@ -223,7 +223,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.103",
+			LocalIPAddress: "192.168.1.103",
 		}
 		db.Create(device)
 
@@ -241,7 +241,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 			InstalledBy: "system",
 		})
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock responses:
 		// - Docker is NOT installed (no response = error)
@@ -297,7 +297,7 @@ func TestSoftwareService_DetectInstalled(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Bare Server",
-			IPAddress: "192.168.1.104",
+			LocalIPAddress: "192.168.1.104",
 		}
 		db.Create(device)
 

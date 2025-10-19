@@ -1,12 +1,21 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/jared-cannon/homelab-orchestration-platform/internal/models"
 	"github.com/jared-cannon/homelab-orchestration-platform/internal/services"
+)
+
+var (
+	// recipeSlugPattern defines allowed characters for recipe slugs (alphanumeric, hyphens, underscores)
+	// This prevents path traversal attacks even after URL decoding
+	recipeSlugPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 )
 
 // DeploymentHandler handles deployment-related HTTP requests
@@ -27,6 +36,7 @@ func (h *DeploymentHandler) RegisterRoutes(router fiber.Router) {
 	deployments.Get("", h.ListDeployments)
 	deployments.Post("", h.CreateDeployment)
 	deployments.Delete("/cleanup", h.CleanupDeployments)
+	deployments.Get("/check-dependencies/:recipe_slug/:device_id", h.CheckRecipeDependencies)
 	deployments.Get("/:id", h.GetDeployment)
 	deployments.Delete("/:id", h.DeleteDeployment)
 	deployments.Post("/:id/cancel", h.CancelDeployment)
@@ -213,4 +223,68 @@ func (h *DeploymentHandler) CleanupDeployments(c *fiber.Ctx) error {
 		"deleted_count": count,
 		"status":        status,
 	})
+}
+
+// CheckRecipeDependencies checks dependencies for a recipe before deployment
+// Allows frontend to preview what dependencies will be auto-provisioned
+func (h *DeploymentHandler) CheckRecipeDependencies(c *fiber.Ctx) error {
+	recipeSlug := strings.TrimSpace(c.Params("recipe_slug"))
+	deviceIDStr := c.Params("device_id")
+
+	// Validate recipe_slug parameter with regex whitelist
+	// This prevents path traversal even after URL decoding (e.g., %2F becomes /)
+	if recipeSlug == "" || len(recipeSlug) > 100 {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error: "Invalid recipe_slug parameter: must be 1-100 characters",
+		})
+	}
+	if !recipeSlugPattern.MatchString(recipeSlug) {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error: "Invalid recipe_slug parameter: only alphanumeric characters, hyphens, and underscores allowed",
+		})
+	}
+
+	// Parse device ID
+	deviceID, err := uuid.Parse(deviceIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+			Error: "Invalid device_id parameter",
+		})
+	}
+
+	// TODO: When multi-user support is implemented, verify that the current user owns the device
+	// Example:
+	// device, err := h.deviceService.GetDevice(deviceID)
+	// if err != nil || device.UserID != currentUserID {
+	//     return c.Status(fiber.StatusForbidden).JSON(ErrorResponse{
+	//         Error: "Access denied",
+	//     })
+	// }
+
+	// Check dependencies
+	result, err := h.deploymentService.CheckRecipeDependencies(recipeSlug, deviceID)
+	if err != nil {
+		// Return appropriate HTTP status based on typed errors
+		if errors.Is(err, services.ErrRecipeNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(ErrorResponse{
+				Error: err.Error(),
+			})
+		}
+		if errors.Is(err, services.ErrRecipeValidationFailed) {
+			return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
+				Error: err.Error(),
+			})
+		}
+		if errors.Is(err, services.ErrDependencyServiceNotInit) {
+			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+				Error: "Service initialization error",
+			})
+		}
+		// Generic server error for unexpected errors (including ErrDependencyCheckFailed)
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to check dependencies: %v", err),
+		})
+	}
+
+	return c.JSON(result)
 }

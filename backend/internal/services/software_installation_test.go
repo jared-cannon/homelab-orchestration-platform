@@ -97,7 +97,7 @@ func TestSoftwareService_InstallationPanicRecovery(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
@@ -149,11 +149,11 @@ func TestSoftwareService_InstallationCompletedAt(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Software already installed (use exact command from docker.yaml)
 		mockSSH.SetResponse(host, "docker --version 2>/dev/null", "Docker version 24.0.0", nil)
@@ -211,7 +211,7 @@ func TestSoftwareService_InstallationCompletedAt(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
@@ -259,11 +259,11 @@ func TestSoftwareService_DatabaseErrorHandling(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Software already installed (use exact command from docker.yaml)
 		mockSSH.SetResponse(host, "docker --version 2>/dev/null", "Docker version 24.0.0", nil)
@@ -324,11 +324,11 @@ func TestSoftwareService_WebSocketBroadcasting(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Software already installed (use exact command from docker.yaml)
 		mockSSH.SetResponse(host, "docker --version 2>/dev/null", "Docker version 24.0.0", nil)
@@ -397,11 +397,11 @@ func TestSoftwareService_WebSocketBroadcasting(t *testing.T) {
 		device := &models.Device{
 			ID:        uuid.New(),
 			Name:      "Test Server",
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 		db.Create(device)
 
-		host := device.IPAddress + ":22"
+		host := device.GetSSHHost()
 
 		// Mock: Software already installed (use exact command from docker.yaml)
 		mockSSH.SetResponse(host, "docker --version 2>/dev/null", "Docker version 24.0.0", nil)

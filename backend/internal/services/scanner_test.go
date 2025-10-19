@@ -37,7 +37,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "Synology NAS by OS",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.102",
+				LocalIPAddress: "192.168.1.102",
 				OS:        "Synology DSM 7.0",
 			},
 			expected: "Synology NAS (192.168.1.102)",
@@ -54,7 +54,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "Ubuntu Server without Docker",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.104",
+				LocalIPAddress: "192.168.1.104",
 				OS:        "Ubuntu 22.04",
 			},
 			expected: "Ubuntu Server (192.168.1.104)",
@@ -70,7 +70,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "Meaningful hostname",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.106",
+				LocalIPAddress: "192.168.1.106",
 				Hostname:  "my-server.local",
 			},
 			expected: "My-Server (192.168.1.106)",
@@ -78,7 +78,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "NAS by device type",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.107",
+				LocalIPAddress: "192.168.1.107",
 				Type:      models.DeviceTypeNAS,
 			},
 			expected: "NAS (192.168.1.107)",
@@ -86,7 +86,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "Router by device type",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.108",
+				LocalIPAddress: "192.168.1.108",
 				Type:      models.DeviceTypeRouter,
 			},
 			expected: "Router (192.168.1.108)",
@@ -94,7 +94,7 @@ func TestGenerateSmartName(t *testing.T) {
 		{
 			name: "Generic server fallback",
 			device: &DiscoveredDevice{
-				IPAddress: "192.168.1.109",
+				LocalIPAddress: "192.168.1.109",
 				Type:      models.DeviceTypeServer,
 			},
 			expected: "Server (192.168.1.109)",

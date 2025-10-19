@@ -87,7 +87,7 @@ export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCr
 
     try {
       const result = await testConnection.mutateAsync({
-        ip_address: device.ip_address,
+        ip_address: device.local_ip_address,
         credentials: formData,
       })
 
@@ -98,7 +98,7 @@ export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCr
           : '⚠️ Docker not installed'
 
         toast.success('Connection successful!', {
-          description: `Connected to ${device.ip_address}. ${dockerInfo}`
+          description: `Connected to ${device.local_ip_address}. ${dockerInfo}`
         })
       }
     } catch (error) {
@@ -133,7 +133,7 @@ export function UpdateCredentialsDialog({ device, open, onOpenChange }: UpdateCr
           <DialogHeader>
             <DialogTitle>Update Login Credentials</DialogTitle>
             <DialogDescription>
-              Update the login information for {device.name} ({device.ip_address})
+              Update the login information for {device.name} ({device.local_ip_address})
             </DialogDescription>
           </DialogHeader>
 

@@ -136,8 +136,11 @@ Positioning: Kubernetes-level intelligence with CasaOS-level simplicity.
 - 🚧 Intelligent resource scoring
 - 🚧 Shared database infrastructure
 - 🚧 Cross-device resource aggregation
+- 🚧 Curated SaaS replacement marketplace
+- 🚧 Dependency auto-provisioning
+- 🚧 Laravel Forge-style infrastructure provisioning
 
-Reference: [architecture.md](architecture.md), [intelligent-orchestration.md](intelligent-orchestration.md)
+Reference: [architecture.md](architecture.md), [intelligent-orchestration.md](intelligent-orchestration.md), [curated-marketplace.md](curated-marketplace.md), [infrastructure-provisioning.md](infrastructure-provisioning.md)
 
 ## Current Status
 
@@ -319,6 +322,229 @@ Apps using shared Postgres on Server-02:
 - Suggest optimizations:
   - "3 apps using separate Postgres instances → Migrate to shared instance? (Save 2GB)"
   - "Vaultwarden has 3GB RAM allocated but only uses 500MB → Reduce allocation?"
+
+---
+
+## Phase 3.5: Curated "Escape SaaS" Marketplace
+
+**Goal:** Guide users from SaaS to self-hosted solutions with curated recommendations
+
+See [curated-marketplace.md](curated-marketplace.md) for detailed documentation.
+
+### Problem
+
+Traditional homelab marketplaces overwhelm users with hundreds of apps organized by technical categories. Users don't know **why** they need these apps or **what SaaS services** they replace.
+
+### Solution: Curated SaaS Replacement Journeys
+
+**Instead of:** "Here are 280 apps, good luck"
+
+**We provide:** "Want to leave Google? Here's exactly how."
+
+### Features
+
+**1. SaaS-Focused Categories**
+- "Replace Google Workspace" → Nextcloud, Collabora
+- "Replace Google Photos" → Immich
+- "Replace Zapier" → n8n
+- "Replace Dropbox" → Nextcloud, Syncthing
+- "Password Manager" → Vaultwarden
+- "Media Server" → Jellyfin, Plex
+
+**2. Comparison Tables**
+```
+Google Photos vs Immich:
+- Storage: 15GB free → Unlimited (your hardware)
+- Privacy: Google scans → Your data
+- Cost: $2-20/mo → Hardware only
+- Setup: Instant → 5 minutes with our platform
+```
+
+**3. Bundle Deployments**
+- "Escape Google Bundle" → Nextcloud + Immich + Vaultwarden in one click
+- "Media Center Bundle" → Jellyfin + Sonarr + Radarr
+- "Developer Stack" → GitLab + Drone CI + Portainer
+
+**4. Dependency Auto-Provisioning**
+
+See [dependency-management.md](dependency-management.md) for detailed documentation.
+
+**User Experience:**
+```
+User clicks "Deploy Immich"
+    ↓
+System: "Immich needs Traefik, Postgres, and Redis. Deploy them? [Yes]"
+    ↓
+User clicks "Yes"
+    ↓
+System automatically:
+- Deploys Traefik (1/4) - 55 seconds
+- Provisions PostgreSQL database (2/4) - 22 seconds
+- Provisions Redis cache (3/4) - 15 seconds
+- Deploys Immich (4/4) - 42 seconds
+    ↓
+Success: "Immich ready at https://photos.homelab.local"
+```
+
+**Benefits:**
+- **Zero manual setup** of databases, reverse proxies, caches
+- **Resource efficiency**: Shared instances save 60-70% RAM
+- **95%+ deployment success rate** vs 60% traditional
+- **2 minutes** vs 2-4 hours manual setup
+
+**5. Quality Scores**
+- GitHub stars (0-30 points)
+- Recency (0-20 points)
+- Success rate (0-15 points)
+- Metadata completeness (0-10 points)
+- Total: 0-100 score
+
+**6. Enhanced Recipe Metadata**
+```yaml
+# New fields in manifest.yaml
+saas_replacements:
+  - name: "Google Photos"
+  - name: "iCloud Photos"
+
+difficulty_level: "beginner"
+setup_time_minutes: 5
+popularity_score: 95
+
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+    - type: database
+      engine: postgres
+      shared: true
+```
+
+### Success Metrics
+- Deployment success rate: > 95%
+- Time to first app: < 10 minutes
+- Dependency auto-deploy success: > 90%
+
+---
+
+## Phase 3.6: Laravel Forge-Style Infrastructure Provisioning
+
+**Goal:** Bring Laravel Forge/Vapor's one-click provisioning to homelabs
+
+See [infrastructure-provisioning.md](infrastructure-provisioning.md) and [laravel-integration.md](laravel-integration.md) for detailed documentation.
+
+### Problem
+
+Deploying Laravel apps to homelabs requires:
+- Manual Nginx configuration
+- PHP installation and tuning
+- Database creation
+- Queue worker setup (Supervisor)
+- Scheduler configuration (Cron)
+- SSL/HTTPS setup
+
+**Result:** Hours of terminal work, frequent mistakes
+
+### Solution: One-Click Laravel Infrastructure
+
+**Server Types** (inspired by Forge):
+
+1. **App Server**: Complete Laravel environment
+   - Nginx + PHP 8.3 + Composer + Node.js
+   - PostgreSQL/MySQL database
+   - Redis cache
+   - Supervisor (queue workers)
+   - Cron (scheduler)
+
+2. **Web Server**: Frontend-only (no database)
+   - Nginx + PHP + Composer + Node.js
+
+3. **Database Server**: Dedicated database
+   - PostgreSQL or MySQL
+   - Automated backups
+   - Remote access configured
+
+4. **Worker Server**: Queue processing
+   - PHP + Supervisor + Horizon
+   - Multiple workers configured
+
+5. **Cache Server**: Dedicated Redis/Memcached
+   - Performance tuned
+   - Remote access configured
+
+### User Experience
+
+**Provision Laravel App Server:**
+```
+1. Select "App Server"
+2. Configure:
+   - PHP Version: 8.3
+   - Database: PostgreSQL 15
+   - Include Redis: Yes
+   - Include Supervisor: Yes
+3. System analyzes homelab → Recommends server-02
+4. Wait 3-5 minutes
+5. Done: Laravel production environment ready
+```
+
+**Deploy Laravel App:**
+```
+1. Enter Git repository: https://github.com/user/my-app
+2. Select server: laravel-production
+3. Enter domain: app.homelab.local
+4. System auto-detects:
+   - PHP 8.3 (from composer.json)
+   - PostgreSQL (from .env.example)
+   - Queue: Redis + Horizon (from composer.json)
+5. Deploy → Wait 2-3 minutes
+6. Done: App live at https://app.homelab.local
+```
+
+**Automatic Configuration:**
+- Nginx vhost (Laravel-optimized)
+- PHP-FPM tuning
+- Database provisioning
+- Queue workers (Supervisor)
+- Laravel scheduler (Cron)
+- Horizon dashboard (if detected)
+- SSL/HTTPS (via Traefik)
+- .env generation with credentials
+
+### Resource Efficiency
+
+**Forge Approach** (each site dedicated resources):
+```
+Site A: Nginx + PHP + MySQL = 1.5GB RAM
+Site B: Nginx + PHP + MySQL = 1.5GB RAM
+Total: 3GB RAM
+```
+
+**Our Approach** (shared infrastructure):
+```
+Shared Nginx: 50MB
+Shared PHP-FPM: 400MB
+Shared PostgreSQL: 800MB
+Total: 1.25GB RAM (58% savings)
+```
+
+### Features
+
+- **Environment detection**: Analyzes composer.json, .env.example automatically
+- **Multi-environment support**: Production, staging, development
+- **Queue management**: Supervisor auto-configuration, Horizon dashboard
+- **Deployment hooks**: Pre/post deployment scripts
+- **Rollback support**: Automatic rollback on failure
+- **Log viewer**: Real-time log streaming
+- **SSH shell access**: Direct shell to server
+
+### Comparison
+
+| Feature | Forge | Coolify | Our Platform |
+|---------|-------|---------|--------------|
+| Laravel-specific | ✅ | ❌ | ✅ |
+| Multi-device | ❌ | ❌ | ✅ |
+| Shared resources | ❌ | Partial | ✅ |
+| Queue workers | ✅ | Manual | ✅ Auto |
+| Cost | $12/mo | Free | Free |
 
 ---
 

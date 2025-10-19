@@ -469,7 +469,7 @@ func (s *ScannerService) detectServicesViaSSH(device *DiscoveredDevice, cred *mo
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	address := fmt.Sprintf("%s:22", device.IPAddress)
+	address := fmt.Sprintf("%s:22", device.IPAddress) // Note: device here is DiscoveredDevice, not models.Device
 
 	// Decrypt credentials
 	password, _ := s.credMatcher.credSvc.DecryptData(cred.Password)
@@ -569,16 +569,16 @@ func (s *ScannerService) generateSmartName(device *DiscoveredDevice) string {
 	for _, service := range device.ServicesDetected {
 		switch service {
 		case "proxmox":
-			return fmt.Sprintf("Proxmox Server (%s)", device.IPAddress)
+			return fmt.Sprintf("Proxmox Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case "portainer", "portainer-alt":
 			if device.DockerDetected {
-				return fmt.Sprintf("Portainer Docker Host (%s)", device.IPAddress)
+				return fmt.Sprintf("Portainer Docker Host (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 			}
-			return fmt.Sprintf("Portainer Server (%s)", device.IPAddress)
+			return fmt.Sprintf("Portainer Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case "home-assistant":
-			return fmt.Sprintf("Home Assistant (%s)", device.IPAddress)
+			return fmt.Sprintf("Home Assistant (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case "grafana":
-			return fmt.Sprintf("Grafana Server (%s)", device.IPAddress)
+			return fmt.Sprintf("Grafana Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		}
 	}
 
@@ -586,27 +586,27 @@ func (s *ScannerService) generateSmartName(device *DiscoveredDevice) string {
 	if device.OS != "" {
 		switch {
 		case strings.Contains(device.OS, "Synology"):
-			return fmt.Sprintf("Synology NAS (%s)", device.IPAddress)
+			return fmt.Sprintf("Synology NAS (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case strings.Contains(device.OS, "Ubuntu"):
 			if device.DockerDetected {
-				return fmt.Sprintf("Ubuntu Docker Host (%s)", device.IPAddress)
+				return fmt.Sprintf("Ubuntu Docker Host (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 			}
-			return fmt.Sprintf("Ubuntu Server (%s)", device.IPAddress)
+			return fmt.Sprintf("Ubuntu Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case strings.Contains(device.OS, "Debian"):
 			if device.DockerDetected {
-				return fmt.Sprintf("Debian Docker Host (%s)", device.IPAddress)
+				return fmt.Sprintf("Debian Docker Host (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 			}
-			return fmt.Sprintf("Debian Server (%s)", device.IPAddress)
+			return fmt.Sprintf("Debian Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case strings.Contains(device.OS, "CentOS"):
-			return fmt.Sprintf("CentOS Server (%s)", device.IPAddress)
+			return fmt.Sprintf("CentOS Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		case strings.Contains(device.OS, "macOS"):
-			return fmt.Sprintf("macOS Host (%s)", device.IPAddress)
+			return fmt.Sprintf("macOS Host (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 		}
 	}
 
 	// Priority 3: Docker detection
 	if device.DockerDetected {
-		return fmt.Sprintf("Docker Host (%s)", device.IPAddress)
+		return fmt.Sprintf("Docker Host (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 	}
 
 	// Priority 4: Hostname if meaningful (not an IP)
@@ -621,13 +621,13 @@ func (s *ScannerService) generateSmartName(device *DiscoveredDevice) string {
 	// Priority 5: Device type
 	switch device.Type {
 	case models.DeviceTypeRouter:
-		return fmt.Sprintf("Router (%s)", device.IPAddress)
+		return fmt.Sprintf("Router (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 	case models.DeviceTypeNAS:
-		return fmt.Sprintf("NAS (%s)", device.IPAddress)
+		return fmt.Sprintf("NAS (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 	case models.DeviceTypeSwitch:
-		return fmt.Sprintf("Switch (%s)", device.IPAddress)
+		return fmt.Sprintf("Switch (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 	default:
-		return fmt.Sprintf("Server (%s)", device.IPAddress)
+		return fmt.Sprintf("Server (%s)", device.IPAddress) // Note: device here is DiscoveredDevice, uses IPAddress field
 	}
 }
 

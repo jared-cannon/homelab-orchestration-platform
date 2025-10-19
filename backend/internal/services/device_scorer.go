@@ -84,7 +84,7 @@ func (s *DeviceScorer) scoreDevice(device models.Device, requirements RecipeRequ
 	score := DeviceScore{
 		DeviceID:   device.ID,
 		DeviceName: device.Name,
-		DeviceIP:   device.IPAddress,
+		DeviceIP:   device.GetPrimaryAddress(),
 		Score:      0,
 		Reasons:    make([]string, 0),
 		Available:  true,
@@ -209,7 +209,7 @@ func (s *DeviceScorer) scoreCPU(totalCores, requiredCores int) (int, string) {
 
 // getDeviceResources retrieves current resource availability from a device
 func (s *DeviceScorer) getDeviceResources(device models.Device) (*DeviceResources, error) {
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 	resources := &DeviceResources{}
 
 	// Get available RAM in MB

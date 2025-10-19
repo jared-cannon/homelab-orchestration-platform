@@ -39,7 +39,7 @@ type PortSpec struct {
 
 // CheckFirewall checks the firewall status on a device
 func (f *FirewallService) CheckFirewall(device *models.Device) (*FirewallStatus, error) {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	status := &FirewallStatus{
 		OpenPorts: []int{},
@@ -147,12 +147,12 @@ func (f *FirewallService) OpenPorts(device *models.Device, portSpecs []PortSpec)
 		return nil
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Check firewall status
 	status, err := f.CheckFirewall(device)
 	if err != nil {
-		return fmt.Errorf("failed to check firewall on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to check firewall on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 
 	// If no firewall or not enabled, no action needed
@@ -197,14 +197,14 @@ func (f *FirewallService) openPortsUFW(host string, device *models.Device, portS
 		_, err := f.sshClient.ExecuteWithTimeout(host, cmd, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to open port %d/%s on %s (%s): %w",
-				spec.Port, spec.Protocol, device.Name, device.IPAddress, err)
+				spec.Port, spec.Protocol, device.Name, device.GetPrimaryAddress(), err)
 		}
 	}
 
 	// Reload UFW to apply changes
 	_, err := f.sshClient.ExecuteWithTimeout(host, "sudo ufw reload", 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to reload UFW on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to reload UFW on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 	return nil
 }
@@ -217,14 +217,14 @@ func (f *FirewallService) openPortsFirewalld(host string, device *models.Device,
 		_, err := f.sshClient.ExecuteWithTimeout(host, cmd, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to open port %d/%s on %s (%s): %w",
-				spec.Port, spec.Protocol, device.Name, device.IPAddress, err)
+				spec.Port, spec.Protocol, device.Name, device.GetPrimaryAddress(), err)
 		}
 	}
 
 	// Reload firewalld to apply changes
 	_, err := f.sshClient.ExecuteWithTimeout(host, "sudo firewall-cmd --reload", 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to reload firewalld on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to reload firewalld on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 	return nil
 }
@@ -336,12 +336,12 @@ func (f *FirewallService) ClosePorts(device *models.Device, portSpecs []PortSpec
 		return nil
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Check firewall status
 	status, err := f.CheckFirewall(device)
 	if err != nil {
-		return fmt.Errorf("failed to check firewall on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to check firewall on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 
 	// If no firewall or not enabled, no action needed
@@ -368,14 +368,14 @@ func (f *FirewallService) closePortsUFW(host string, device *models.Device, port
 		_, err := f.sshClient.ExecuteWithTimeout(host, cmd, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to close port %d/%s on %s (%s): %w",
-				spec.Port, spec.Protocol, device.Name, device.IPAddress, err)
+				spec.Port, spec.Protocol, device.Name, device.GetPrimaryAddress(), err)
 		}
 	}
 
 	// Reload UFW to apply changes
 	_, err := f.sshClient.ExecuteWithTimeout(host, "sudo ufw reload", 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to reload UFW on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to reload UFW on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 	return nil
 }
@@ -388,14 +388,14 @@ func (f *FirewallService) closePortsFirewalld(host string, device *models.Device
 		_, err := f.sshClient.ExecuteWithTimeout(host, cmd, 10*time.Second)
 		if err != nil {
 			return fmt.Errorf("failed to close port %d/%s on %s (%s): %w",
-				spec.Port, spec.Protocol, device.Name, device.IPAddress, err)
+				spec.Port, spec.Protocol, device.Name, device.GetPrimaryAddress(), err)
 		}
 	}
 
 	// Reload firewalld to apply changes
 	_, err := f.sshClient.ExecuteWithTimeout(host, "sudo firewall-cmd --reload", 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to reload firewalld on %s (%s): %w", device.Name, device.IPAddress, err)
+		return fmt.Errorf("failed to reload firewalld on %s (%s): %w", device.Name, device.GetPrimaryAddress(), err)
 	}
 	return nil
 }

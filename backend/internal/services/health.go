@@ -166,7 +166,7 @@ func (h *HealthCheckService) checkDeviceHealth(ctx context.Context, deviceID uui
 	}
 
 	// Try to establish SSH connection
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// First, try to get existing connection from pool (avoids re-authentication)
 	client, err := h.sshClient.GetConnection(host)

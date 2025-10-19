@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { useCreateDevice, useTestConnectionBeforeCreate } from '../api/hooks'
 import type { DeviceType } from '../api/types'
@@ -24,10 +24,13 @@ import {
 
 export function AddDeviceDialog() {
   const [open, setOpen] = useState(false)
+  const [showTailscaleSection, setShowTailscaleSection] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     type: 'server' as DeviceType,
-    ip_address: '',
+    local_ip_address: '',
+    tailscale_address: '',
+    primary_connection: 'local' as 'local' | 'tailscale',
     mac_address: '',
     credentials: {
       type: 'auto' as 'auto' | 'password' | 'ssh_key' | 'tailscale',
@@ -41,14 +44,31 @@ export function AddDeviceDialog() {
   const createDevice = useCreateDevice()
   const testConnection = useTestConnectionBeforeCreate()
 
+  // Auto-expand Tailscale section when Tailscale auth is selected
+  useEffect(() => {
+    if (formData.credentials.type === 'tailscale') {
+      setShowTailscaleSection(true)
+    }
+  }, [formData.credentials.type])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    // Validation: if using Tailscale auth, require Tailscale address
+    if (formData.credentials.type === 'tailscale' && !formData.tailscale_address) {
+      toast.error('Tailscale address required', {
+        description: 'When using Tailscale SSH, please provide a Tailscale address'
+      })
+      return
+    }
 
     try {
       await createDevice.mutateAsync({
         name: formData.name,
         type: formData.type,
-        ip_address: formData.ip_address,
+        local_ip_address: formData.local_ip_address,
+        tailscale_address: formData.tailscale_address || undefined,
+        primary_connection: formData.primary_connection,
         mac_address: formData.mac_address || undefined,
         credentials: formData.credentials,
       })
@@ -61,7 +81,9 @@ export function AddDeviceDialog() {
       setFormData({
         name: '',
         type: 'server',
-        ip_address: '',
+        local_ip_address: '',
+        tailscale_address: '',
+        primary_connection: 'local',
         mac_address: '',
         credentials: {
           type: 'auto',
@@ -71,6 +93,7 @@ export function AddDeviceDialog() {
           ssh_key_passwd: '',
         },
       })
+      setShowTailscaleSection(false)
       setOpen(false)
     } catch (error) {
       const err = error as Error
@@ -95,7 +118,7 @@ export function AddDeviceDialog() {
 
   const handleTestConnection = async () => {
     // Validate required fields
-    if (!formData.ip_address || !formData.credentials.username) {
+    if (!formData.local_ip_address || !formData.credentials.username) {
       toast.error('Missing information', {
         description: 'Please enter an IP address and username first'
       })
@@ -118,9 +141,14 @@ export function AddDeviceDialog() {
 
     // For auto type, no additional validation needed - will use SSH agent/default keys
 
+    // Use primary connection for testing
+    const testAddress = formData.primary_connection === 'tailscale' && formData.tailscale_address
+      ? formData.tailscale_address
+      : formData.local_ip_address
+
     try {
       const result = await testConnection.mutateAsync({
-        ip_address: formData.ip_address,
+        ip_address: testAddress,
         credentials: formData.credentials,
       })
 
@@ -131,7 +159,7 @@ export function AddDeviceDialog() {
           : '⚠️ Docker not installed'
 
         toast.success('Connection successful!', {
-          description: `Connected to ${formData.ip_address}. ${dockerInfo}`
+          description: `Connected to ${testAddress}. ${dockerInfo}`
         })
       }
     } catch (error) {
@@ -212,24 +240,89 @@ export function AddDeviceDialog() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="ip">
-                {formData.credentials.type === 'tailscale' ? 'IP Address or Hostname' : 'IP Address'}
-              </Label>
+              <Label htmlFor="local-ip">Local IP Address</Label>
               <Input
-                id="ip"
-                value={formData.ip_address}
+                id="local-ip"
+                value={formData.local_ip_address}
                 onChange={(e) =>
-                  setFormData({ ...formData, ip_address: e.target.value })
+                  setFormData({ ...formData, local_ip_address: e.target.value })
                 }
-                placeholder={formData.credentials.type === 'tailscale' ? '100.64.1.5 or machine.wolf-bear.ts.net' : '192.168.1.100'}
+                placeholder="192.168.1.100"
                 required
               />
-              {formData.credentials.type === 'tailscale' && (
-                <p className="text-xs text-muted-foreground">
-                  You can use either a Tailscale IP (100.x.x.x) or hostname
-                </p>
-              )}
             </div>
+
+            {!showTailscaleSection && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowTailscaleSection(true)}
+                className="w-full"
+              >
+                + Add Tailscale Address (Optional)
+              </Button>
+            )}
+
+            {showTailscaleSection && (
+              <div className="grid gap-3 p-4 border rounded-md bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Tailscale Connection</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowTailscaleSection(false)
+                      setFormData({
+                        ...formData,
+                        tailscale_address: '',
+                        primary_connection: 'local',
+                      })
+                    }}
+                    className="h-6 px-2"
+                  >
+                    Remove
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="tailscale-ip">Tailscale IP or Hostname</Label>
+                  <Input
+                    id="tailscale-ip"
+                    value={formData.tailscale_address}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tailscale_address: e.target.value })
+                    }
+                    placeholder="100.64.1.5 or machine.wolf-bear.ts.net"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    For remote access via Tailscale VPN
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="primary-connection">Preferred Connection</Label>
+                  <Select
+                    value={formData.primary_connection}
+                    onValueChange={(value: 'local' | 'tailscale') =>
+                      setFormData({ ...formData, primary_connection: value })
+                    }
+                  >
+                    <SelectTrigger id="primary-connection">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="local">Local IP (Primary)</SelectItem>
+                      <SelectItem value="tailscale">Tailscale (Primary)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    System will try primary first, then fallback to the other
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="mac">MAC Address (Optional)</Label>

@@ -99,6 +99,16 @@ volumes:
     backup_priority: high
     backup_frequency: daily
 
+# Dependency Auto-Provisioning (NEW)
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+      alternatives: [caddy, nginx-proxy-manager]
+  recommended:
+    - type: backup
+      for_volumes: [vaultwarden_data]
+
 # Post-deployment automation
 post_install:
   - type: message
@@ -164,6 +174,96 @@ volumes:
 
 ---
 
+## Dependency Auto-Provisioning
+
+### Overview
+
+Automatically detect and deploy infrastructure dependencies to simplify deployment. When deploying an app that requires Traefik, PostgreSQL, or Redis, the system automatically provisions these services.
+
+See [dependency-management.md](dependency-management.md) for detailed documentation.
+
+### Dependency Types
+
+**Infrastructure Dependencies:**
+- **Reverse Proxy**: Traefik, Caddy, Nginx Proxy Manager (for HTTPS and domain routing)
+- **Database**: PostgreSQL, MySQL, MariaDB (shared or dedicated instances)
+- **Cache**: Redis, Memcached (shared instances with key prefixing)
+
+**Application Dependencies:**
+- Other apps that this app requires (e.g., Collabora requires Nextcloud)
+- Auto-configuration when possible
+
+### manifest.yaml Dependency Declaration
+
+```yaml
+# Enhanced manifest with dependencies
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+      alternatives: [caddy, nginx-proxy-manager]
+
+    - type: database
+      engine: postgres
+      auto_provision: true
+      shared: true  # Use shared instance (default)
+
+    - type: cache
+      engine: redis
+      auto_provision: true
+      shared: true
+
+  recommended:
+    - type: backup
+      for_volumes: [app-data, app-uploads]
+      message: "Recommended: Enable automated backups for data protection"
+```
+
+### Deployment with Dependencies
+
+**Enhanced User Workflow:**
+```
+1. Browse marketplace → Select app
+2. System analyzes devices → Recommends optimal device
+3. System checks dependencies:
+   - Missing Traefik? → Prompt to auto-deploy
+   - Missing Postgres? → Auto-provision database in shared instance
+   - Missing Redis? → Auto-provision cache in shared instance
+4. User confirms deployment with dependencies
+5. System provisions dependencies first (in correct order)
+6. Deploy app with auto-generated credentials
+7. Access app at generated URL
+```
+
+**Benefits:**
+- **Zero Configuration**: Users don't need to manually provision databases, caches, or reverse proxies
+- **Resource Efficiency**: Shared instances reduce RAM usage by 60-70%
+- **Automatic Networking**: Apps automatically configured to connect to dependencies
+- **Error Prevention**: Ensures all requirements are satisfied before deployment
+
+### Resource Savings via Shared Infrastructure
+
+**Traditional Approach (without sharing):**
+```
+App A: Nginx + PHP + Postgres + Redis = 1.5GB RAM
+App B: Nginx + PHP + Postgres + Redis = 1.5GB RAM
+App C: Nginx + PHP + Postgres + Redis = 1.5GB RAM
+Total: 4.5GB RAM
+```
+
+**Our Approach (with shared infrastructure):**
+```
+Shared Traefik: 100MB RAM (all apps)
+Shared Postgres: 800MB RAM (3 databases)
+Shared Redis: 250MB RAM (3 key prefixes)
+Apps (PHP only): 3 × 400MB = 1.2GB RAM
+Total: 2.35GB RAM
+
+Savings: 2.15GB RAM (48% reduction)
+```
+
+---
+
 ## Deployment Flow
 
 ### User Workflow
@@ -171,11 +271,12 @@ volumes:
 ```
 1. Browse marketplace → Select app
 2. System analyzes devices → Recommends optimal device
-3. User confirms or overrides device selection
-4. Configure app options (most: zero config)
-5. System provisions dependencies (database, cache)
-6. Deploy with real-time progress
-7. Access app at generated URL
+3. System checks dependencies → Prompts for auto-provisioning
+4. User confirms or overrides device selection
+5. Configure app options (most: zero config)
+6. System provisions dependencies (Traefik, database, cache)
+7. Deploy with real-time progress
+8. Access app at generated URL
 ```
 
 ### Technical Process
@@ -183,19 +284,28 @@ volumes:
 ```
 1. Fetch manifest.yaml + docker-compose.yaml from repository
          ↓
-2. Intelligence Layer Enhancement:
+2. Dependency Analysis:
+   - Check required dependencies (reverse proxy, database, cache)
+   - Check if dependencies exist on target device
+   - Build dependency provision plan
+         ↓
+3. Dependency Provisioning (if needed):
+   - Deploy Traefik (if missing and required)
+   - Provision database in shared instance (if needed)
+   - Provision cache in shared instance (if needed)
+   - Wait for dependencies to be healthy
+         ↓
+4. Intelligence Layer Enhancement:
    - Device selection (resource scoring algorithm)
-   - Database provisioning (if auto_provision enabled)
-   - Cache provisioning (if auto_provision enabled)
-   - Secret generation (passwords, API keys)
+   - Secret generation (passwords, API keys, DB credentials)
    - Placement constraint injection
-   - Environment variable substitution
+   - Environment variable substitution (including dependency credentials)
          ↓
-3. Programmatic deployment via Docker Swarm API
+5. Programmatic deployment via Docker Swarm API
          ↓
-4. Post-install hook execution
+6. Post-install hook execution
          ↓
-5. Health monitoring activation
+7. Health monitoring activation
 ```
 
 ### State Machine

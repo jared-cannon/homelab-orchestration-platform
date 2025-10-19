@@ -19,27 +19,31 @@ func NewDeviceHandler(service *services.DeviceService) *DeviceHandler {
 
 // CreateDeviceRequest represents the request body for creating a device
 type CreateDeviceRequest struct {
-	Name       string                       `json:"name" validate:"required"`
-	Type       models.DeviceType            `json:"type" validate:"required"`
-	IPAddress  string                       `json:"ip_address" validate:"required"`
-	MACAddress string                       `json:"mac_address,omitempty"`
-	Metadata   map[string]interface{}       `json:"metadata,omitempty"`
-	Credentials services.DeviceCredentials `json:"credentials" validate:"required"`
+	Name              string                        `json:"name" validate:"required"`
+	Type              models.DeviceType             `json:"type" validate:"required"`
+	LocalIPAddress    string                        `json:"local_ip_address" validate:"required"`
+	TailscaleAddress  string                        `json:"tailscale_address,omitempty"`
+	PrimaryConnection models.PrimaryConnection      `json:"primary_connection,omitempty"`
+	MACAddress        string                        `json:"mac_address,omitempty"`
+	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
+	Credentials       services.DeviceCredentials    `json:"credentials" validate:"required"`
 }
 
 // TestConnectionRequest represents the request body for testing a connection
 type TestConnectionRequest struct {
-	IPAddress  string                       `json:"ip_address" validate:"required"`
-	Credentials services.DeviceCredentials `json:"credentials" validate:"required"`
+	IPAddress   string                      `json:"ip_address" validate:"required"`
+	Credentials services.DeviceCredentials  `json:"credentials" validate:"required"`
 }
 
 // UpdateDeviceRequest represents the request body for updating a device
 type UpdateDeviceRequest struct {
-	Name       *string                `json:"name,omitempty"`
-	Type       *models.DeviceType     `json:"type,omitempty"`
-	IPAddress  *string                `json:"ip_address,omitempty"`
-	MACAddress *string                `json:"mac_address,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Name              *string                   `json:"name,omitempty"`
+	Type              *models.DeviceType        `json:"type,omitempty"`
+	LocalIPAddress    *string                   `json:"local_ip_address,omitempty"`
+	TailscaleAddress  *string                   `json:"tailscale_address,omitempty"`
+	PrimaryConnection *models.PrimaryConnection `json:"primary_connection,omitempty"`
+	MACAddress        *string                   `json:"mac_address,omitempty"`
+	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
 }
 
 // UpdateCredentialsRequest represents the request body for updating device credentials
@@ -73,12 +77,34 @@ func (h *DeviceHandler) CreateDevice(c *fiber.Ctx) error {
 		return err
 	}
 
+	// Additional validation: if auth type is tailscale, both addresses required
+	if req.Credentials.Type == "tailscale" && req.TailscaleAddress == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Tailscale address is required when using Tailscale authentication",
+		})
+	}
+
+	// Set default primary connection if not specified
+	primaryConnection := req.PrimaryConnection
+	if primaryConnection == "" {
+		primaryConnection = models.PrimaryConnectionLocal
+	}
+
+	// Validate that primary connection has a matching address
+	if primaryConnection == models.PrimaryConnectionTailscale && req.TailscaleAddress == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Tailscale address is required when using Tailscale as primary connection",
+		})
+	}
+
 	device := &models.Device{
-		Name:       req.Name,
-		Type:       req.Type,
-		IPAddress:  req.IPAddress,
-		MACAddress: req.MACAddress,
-		Status:     models.DeviceStatusUnknown,
+		Name:              req.Name,
+		Type:              req.Type,
+		LocalIPAddress:    req.LocalIPAddress,
+		TailscaleAddress:  req.TailscaleAddress,
+		PrimaryConnection: primaryConnection,
+		MACAddress:        req.MACAddress,
+		Status:            models.DeviceStatusUnknown,
 	}
 
 	if err := h.service.CreateDevice(device, &req.Credentials); err != nil {
@@ -123,6 +149,14 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get current device state for validation
+	device, err := h.service.GetDevice(id)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{
+			"error": "Device not found",
+		})
+	}
+
 	updates := make(map[string]interface{})
 	if req.Name != nil {
 		updates["name"] = *req.Name
@@ -130,8 +164,14 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 	if req.Type != nil {
 		updates["type"] = *req.Type
 	}
-	if req.IPAddress != nil {
-		updates["ip_address"] = *req.IPAddress
+	if req.LocalIPAddress != nil {
+		updates["local_ip_address"] = *req.LocalIPAddress
+	}
+	if req.TailscaleAddress != nil {
+		updates["tailscale_address"] = *req.TailscaleAddress
+	}
+	if req.PrimaryConnection != nil {
+		updates["primary_connection"] = *req.PrimaryConnection
 	}
 	if req.MACAddress != nil {
 		updates["mac_address"] = *req.MACAddress
@@ -140,12 +180,29 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 		updates["metadata"] = req.Metadata
 	}
 
+	// Validate primary connection has matching address
+	finalPrimaryConnection := device.PrimaryConnection
+	if req.PrimaryConnection != nil {
+		finalPrimaryConnection = *req.PrimaryConnection
+	}
+	finalTailscaleAddress := device.TailscaleAddress
+	if req.TailscaleAddress != nil {
+		finalTailscaleAddress = *req.TailscaleAddress
+	}
+
+	if finalPrimaryConnection == models.PrimaryConnectionTailscale && finalTailscaleAddress == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error": "Cannot set Tailscale as primary connection without a Tailscale address",
+		})
+	}
+
 	if err := h.service.UpdateDevice(id, updates); err != nil {
 		return HandleError(c, 400, err, "Failed to update device")
 	}
 
-	device, _ := h.service.GetDevice(id)
-	return c.JSON(device)
+	// Fetch updated device to return
+	updatedDevice, _ := h.service.GetDevice(id)
+	return c.JSON(updatedDevice)
 }
 
 // DeleteDevice handles DELETE /api/v1/devices/:id

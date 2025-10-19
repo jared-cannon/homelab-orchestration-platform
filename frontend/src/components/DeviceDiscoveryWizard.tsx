@@ -77,7 +77,7 @@ export function DeviceDiscoveryWizard() {
     // Filter out already-added devices
     const devicesToAdd = scanProgress.devices.filter(
       (device) =>
-        selectedDevices.has(device.ip_address) &&
+        selectedDevices.has(device.local_ip_address) &&
         !device.already_added &&
         device.status !== 'already_added'
     )
@@ -88,9 +88,9 @@ export function DeviceDiscoveryWizard() {
     for (const device of devicesToAdd) {
       try {
         await createDevice.mutateAsync({
-          name: device.hostname || `Device ${device.ip_address}`,
+          name: device.hostname || `Device ${device.local_ip_address}`,
           type: device.type,
-          ip_address: device.ip_address,
+          ip_address: device.local_ip_address,
           mac_address: device.mac_address,
           credentials,
         })
@@ -241,26 +241,26 @@ export function DeviceDiscoveryWizard() {
                       const isAlreadyAdded = device.already_added || device.status === 'already_added'
                       return (
                         <div
-                          key={device.ip_address}
-                          onClick={() => !isAlreadyAdded && handleDeviceSelect(device.ip_address)}
+                          key={device.local_ip_address}
+                          onClick={() => !isAlreadyAdded && handleDeviceSelect(device.local_ip_address)}
                           className={`flex items-center gap-3 p-3 border rounded-lg transition-colors ${
                             isAlreadyAdded
                               ? 'opacity-50 cursor-not-allowed'
                               : 'cursor-pointer hover:bg-accent'
                           } ${
-                            selectedDevices.has(device.ip_address)
+                            selectedDevices.has(device.local_ip_address)
                               ? 'border-primary bg-primary/5'
                               : 'border-border'
                           }`}
                         >
                           <div
                             className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center ${
-                              selectedDevices.has(device.ip_address) && !isAlreadyAdded
+                              selectedDevices.has(device.local_ip_address) && !isAlreadyAdded
                                 ? 'bg-primary border-primary'
                                 : 'border-muted-foreground'
                             }`}
                           >
-                            {selectedDevices.has(device.ip_address) && !isAlreadyAdded && (
+                            {selectedDevices.has(device.local_ip_address) && !isAlreadyAdded && (
                               <CheckCircle2 className="w-3 h-3 text-primary-foreground" />
                             )}
                           </div>
@@ -270,7 +270,7 @@ export function DeviceDiscoveryWizard() {
                               {device.hostname || 'Unknown'}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              {device.ip_address}
+                              {device.local_ip_address}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">

@@ -42,7 +42,7 @@ func (eb *EnvironmentBuilder) BuildEnvironment(
 	// 2. Add deployment-specific variables
 	envMap["DEPLOYMENT_ID"] = deployment.ID.String()
 	envMap["COMPOSE_PROJECT"] = deployment.ComposeProject
-	envMap["DEVICE_IP"] = device.IPAddress
+	envMap["DEVICE_IP"] = device.GetPrimaryAddress()
 
 	// 3. Generate or retrieve persistent secrets
 	secrets, err := eb.secretManager.GenerateOrRetrieveSecrets(deployment.ID, recipe, userConfig)
@@ -130,15 +130,17 @@ func (eb *EnvironmentBuilder) buildEnvFileContent(envMap map[string]string) stri
 }
 
 // escapeEnvValue escapes special characters in environment variable values
+// Values containing special characters are quoted and escaped to prevent parsing issues
 func escapeEnvValue(value string) string {
 	// If value contains spaces, quotes, or special characters, wrap in quotes
-	needsQuotes := strings.ContainsAny(value, " \t\n\"'$`\\#")
+	needsQuotes := strings.ContainsAny(value, " \t\n\r\"'$`\\#")
 
 	if !needsQuotes {
 		return value
 	}
 
-	// Escape existing quotes
-	escaped := strings.ReplaceAll(value, "\"", "\\\"")
+	// Escape backslashes first, then quotes (order matters!)
+	escaped := strings.ReplaceAll(value, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
 	return fmt.Sprintf("\"%s\"", escaped)
 }

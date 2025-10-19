@@ -12,13 +12,13 @@ import (
 func TestEnvironmentBuilder_BuildEnvironment(t *testing.T) {
 	db := setupTestDB(t)
 	credService := setupTestCredentialService(t)
-	dbPoolManager := NewDatabasePoolManager(db, nil, credService)
+	dbPoolManager := NewDatabasePoolManager(db, nil, credService, nil, nil)
 	envBuilder := NewEnvironmentBuilder(credService, dbPoolManager)
 
 	device := &models.Device{
 		ID:        uuid.New(),
 		Name:      "test-device",
-		IPAddress: "192.168.1.100",
+		LocalIPAddress: "192.168.1.100",
 	}
 
 	deployment := &models.Deployment{
@@ -68,7 +68,7 @@ func TestEnvironmentBuilder_BuildEnvironmentWithDatabase(t *testing.T) {
 
 	// Use a credential service with file backend for testing
 	credService := setupTestCredentialService(t)
-	dbPoolManager := NewDatabasePoolManager(db, nil, credService)
+	dbPoolManager := NewDatabasePoolManager(db, nil, credService, nil, nil)
 	envBuilder := NewEnvironmentBuilder(credService, dbPoolManager)
 
 	// Store a test password in credential service
@@ -80,7 +80,7 @@ func TestEnvironmentBuilder_BuildEnvironmentWithDatabase(t *testing.T) {
 	device := &models.Device{
 		ID:        uuid.New(),
 		Name:      "test-device",
-		IPAddress: "192.168.1.100",
+		LocalIPAddress: "192.168.1.100",
 	}
 
 	deployment := &models.Deployment{
@@ -139,7 +139,9 @@ func TestEscapeEnvValue(t *testing.T) {
 		{"With quotes", `hello "world"`, `"hello \"world\""`},
 		{"With newline", "hello\nworld", "\"hello\nworld\""},
 		{"With special chars", "hello$world", `"hello$world"`},
-		{"Already quoted", "test", "test"},
+		{"With backslash", `path\to\file`, `"path\\to\\file"`},
+		{"With backslash and quotes", `say \"hello\"`, `"say \\\"hello\\\""`},
+		{"Empty value", "", ""},
 	}
 
 	for _, tt := range tests {

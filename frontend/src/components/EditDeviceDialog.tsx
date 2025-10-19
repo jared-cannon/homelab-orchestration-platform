@@ -28,10 +28,13 @@ interface EditDeviceDialogProps {
 }
 
 export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialogProps) {
+  const [showTailscaleSection, setShowTailscaleSection] = useState(!!device.tailscale_address)
   const [formData, setFormData] = useState({
     name: device.name,
     type: device.type,
-    ip_address: device.ip_address,
+    local_ip_address: device.local_ip_address,
+    tailscale_address: device.tailscale_address || '',
+    primary_connection: device.primary_connection || ('local' as 'local' | 'tailscale'),
     mac_address: device.mac_address || '',
   })
 
@@ -40,9 +43,12 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
     setFormData({
       name: device.name,
       type: device.type,
-      ip_address: device.ip_address,
+      local_ip_address: device.local_ip_address,
+      tailscale_address: device.tailscale_address || '',
+      primary_connection: device.primary_connection || ('local' as 'local' | 'tailscale'),
       mac_address: device.mac_address || '',
     })
+    setShowTailscaleSection(!!device.tailscale_address)
   }, [device])
 
   const updateDevice = useUpdateDevice()
@@ -51,7 +57,14 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
     e.preventDefault()
 
     // Build update object with only changed fields
-    const updates: { name?: string; type?: DeviceType; ip_address?: string; mac_address?: string } = {}
+    const updates: {
+      name?: string
+      type?: DeviceType
+      local_ip_address?: string
+      tailscale_address?: string
+      primary_connection?: 'local' | 'tailscale'
+      mac_address?: string
+    } = {}
 
     if (formData.name !== device.name) {
       updates.name = formData.name
@@ -59,8 +72,14 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
     if (formData.type !== device.type) {
       updates.type = formData.type
     }
-    if (formData.ip_address !== device.ip_address) {
-      updates.ip_address = formData.ip_address
+    if (formData.local_ip_address !== device.local_ip_address) {
+      updates.local_ip_address = formData.local_ip_address
+    }
+    if (formData.tailscale_address !== (device.tailscale_address || '')) {
+      updates.tailscale_address = formData.tailscale_address || undefined
+    }
+    if (formData.primary_connection !== device.primary_connection) {
+      updates.primary_connection = formData.primary_connection
     }
     if (formData.mac_address !== (device.mac_address || '')) {
       updates.mac_address = formData.mac_address || undefined
@@ -140,17 +159,89 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="edit-ip">IP Address</Label>
+              <Label htmlFor="edit-local-ip">Local IP Address</Label>
               <Input
-                id="edit-ip"
-                value={formData.ip_address}
+                id="edit-local-ip"
+                value={formData.local_ip_address}
                 onChange={(e) =>
-                  setFormData({ ...formData, ip_address: e.target.value })
+                  setFormData({ ...formData, local_ip_address: e.target.value })
                 }
                 placeholder="192.168.1.100"
                 required
               />
             </div>
+
+            {!showTailscaleSection && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowTailscaleSection(true)}
+                className="w-full"
+              >
+                + Add Tailscale Address (Optional)
+              </Button>
+            )}
+
+            {showTailscaleSection && (
+              <div className="grid gap-3 p-4 border rounded-md bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Tailscale Connection</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowTailscaleSection(false)
+                      setFormData({
+                        ...formData,
+                        tailscale_address: '',
+                        primary_connection: 'local',
+                      })
+                    }}
+                    className="h-6 px-2"
+                  >
+                    Remove
+                  </Button>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-tailscale-ip">Tailscale IP or Hostname</Label>
+                  <Input
+                    id="edit-tailscale-ip"
+                    value={formData.tailscale_address}
+                    onChange={(e) =>
+                      setFormData({ ...formData, tailscale_address: e.target.value })
+                    }
+                    placeholder="100.64.1.5 or machine.wolf-bear.ts.net"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    For remote access via Tailscale VPN
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-primary-connection">Preferred Connection</Label>
+                  <Select
+                    value={formData.primary_connection}
+                    onValueChange={(value: 'local' | 'tailscale') =>
+                      setFormData({ ...formData, primary_connection: value })
+                    }
+                  >
+                    <SelectTrigger id="edit-primary-connection">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="local">Local IP (Primary)</SelectItem>
+                      <SelectItem value="tailscale">Tailscale (Primary)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    System will try primary first, then fallback to the other
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="edit-mac">MAC Address (Optional)</Label>

@@ -1,0 +1,115 @@
+# Infrastructure Defaults Configuration
+# Update versions and settings here without modifying code
+# This file provides centralized configuration for shared infrastructure components
+
+databases:
+  postgres:
+    default_version: "16"
+    docker_image: "postgres"
+    port: 5432
+    internal_port: 5432
+    estimated_ram_mb: 256
+    master_username: "postgres"
+    health_check_command: "pg_isready -U postgres"
+    description: "PostgreSQL - Advanced open source relational database"
+
+  mysql:
+    default_version: "8.4"
+    docker_image: "mysql"
+    port: 3306
+    internal_port: 3306
+    estimated_ram_mb: 400
+    master_username: "root"
+    health_check_command: "mysqladmin ping -h localhost"
+    description: "MySQL - Popular open source relational database"
+
+  mariadb:
+    default_version: "11.3"
+    docker_image: "mariadb"
+    port: 3306
+    internal_port: 3306
+    estimated_ram_mb: 400
+    master_username: "root"
+    health_check_command: "mysqladmin ping -h localhost"
+    description: "MariaDB - MySQL-compatible open source database"
+
+caches:
+  valkey:
+    default_version: "8.1"
+    docker_image: "valkey/valkey"
+    port: 6379
+    estimated_ram_mb: 128
+    supports_databases: true
+    max_databases: 16
+    is_default: true
+    description: "Valkey - BSD-licensed Redis alternative (Linux Foundation)"
+
+  redis:
+    default_version: "7.4"
+    docker_image: "redis"
+    port: 6379
+    estimated_ram_mb: 128
+    supports_databases: true
+    max_databases: 16
+    is_default: false
+    description: "Redis - In-memory data structure store (SSPL license)"
+
+  memcached:
+    default_version: "1.6"
+    docker_image: "memcached"
+    port: 11211
+    estimated_ram_mb: 64
+    supports_databases: false
+    max_databases: 0
+    is_default: false
+    description: "Memcached - Distributed memory caching system"
+
+reverse_proxies:
+  traefik:
+    default_version: "3.0"
+    docker_image: "traefik"
+    estimated_ram_mb: 64
+    estimated_storage_gb: 1
+    is_default: true
+    description: "Traefik - Modern HTTP reverse proxy with automatic SSL"
+
+  caddy:
+    default_version: "2.7"
+    docker_image: "caddy"
+    estimated_ram_mb: 50
+    estimated_storage_gb: 1
+    is_default: false
+    description: "Caddy - Simple HTTP server with automatic HTTPS"
+
+  nginx-proxy-manager:
+    default_version: "latest"
+    docker_image: "jc21/nginx-proxy-manager"
+    estimated_ram_mb: 100
+    estimated_storage_gb: 1
+    is_default: false
+    description: "Nginx Proxy Manager - User-friendly reverse proxy with UI"
+
+# Container Orchestration Configuration
+orchestration:
+  mode: "compose"
+  swarm_enabled: false
+  description: |
+    Container orchestration mode:
+    - "compose": Use Docker Compose for single-node deployments (default)
+    - "swarm": Use Docker Swarm for multi-node cluster deployments (future)
+
+    When swarm_enabled is true, additional features are available:
+    - Service scaling and load balancing
+    - Multi-node placement constraints
+    - Rolling updates
+    - Native secrets management
+
+# Metadata
+version: "1.0"
+last_updated: "2025-10-16"
+notes: |
+  - Valkey is the default cache engine (BSD license)
+  - Postgres 16 is the default database
+  - Traefik is the default reverse proxy
+  - Docker Compose is the default orchestration mode
+  - Update versions here as new releases become available

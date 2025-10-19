@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useDevices, useValidateDeployment, useRecommendDevice, useCreateDeployment, useDeployment } from '../api/hooks'
-import type { Recipe, DeviceScore, Deployment } from '../api/types'
+import { apiClient } from '../api/client'
+import { formatTime, formatRAM, getDependencyIcon, getDependencyName } from '../lib/dependency-utils'
+import type { Recipe, DeviceScore, Deployment, DependencyCheckResult } from '../api/types'
 import {
   Dialog,
   DialogContent,
@@ -13,7 +15,7 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
-import { CheckCircle, XCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle, AlertCircle, Loader2, Check, Clock, HardDrive, Cpu } from 'lucide-react'
 import { toast } from 'sonner'
 import { LogViewer } from './LogViewer'
 
@@ -23,13 +25,16 @@ interface DeploymentWizardProps {
   onOpenChange: (open: boolean) => void
 }
 
-type Step = 'select-device' | 'configure' | 'validate' | 'deploy'
+type Step = 'select-device' | 'dependencies' | 'configure' | 'validate' | 'deploy'
 
 export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizardProps) {
   const [currentStep, setCurrentStep] = useState<Step>('select-device')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('')
   const [config, setConfig] = useState<Record<string, any>>({})
   const [deploymentId, setDeploymentId] = useState<string>('')
+  const [dependencies, setDependencies] = useState<DependencyCheckResult | null>(null)
+  const [dependenciesLoading, setDependenciesLoading] = useState(false)
+  const [dependenciesError, setDependenciesError] = useState<string | null>(null)
 
   const { data: devices } = useDevices()
   const { data: deviceScores, isLoading: scoresLoading } = useRecommendDevice(recipe.slug)
@@ -46,10 +51,15 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
       const bestDevice = deviceScores.find((s) => s.available)
       if (bestDevice) {
         setSelectedDeviceId(bestDevice.device_id)
-        initializeConfig()
+        // Initialize config with default values
+        const defaultConfig: Record<string, any> = {}
+        recipe.config_options?.forEach((option) => {
+          defaultConfig[option.name] = option.default
+        })
+        setConfig(defaultConfig)
       }
     }
-  }, [deviceScores, selectedDeviceId])
+  }, [deviceScores, selectedDeviceId, recipe.config_options])
 
   // Initialize config with default values
   const initializeConfig = () => {
@@ -72,12 +82,18 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
     }))
   }
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentStep === 'select-device') {
       if (!selectedDeviceId) {
         toast.error('Please select a device')
         return
       }
+      // Check dependencies first, then advance step only if successful
+      const success = await checkDependencies()
+      if (success) {
+        setCurrentStep('dependencies')
+      }
+    } else if (currentStep === 'dependencies') {
       setCurrentStep('configure')
     } else if (currentStep === 'configure') {
       // Validate required fields
@@ -100,12 +116,34 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
   }
 
   const handleBack = () => {
-    if (currentStep === 'configure') {
+    if (currentStep === 'dependencies') {
       setCurrentStep('select-device')
+    } else if (currentStep === 'configure') {
+      setCurrentStep('dependencies')
     } else if (currentStep === 'validate') {
       setCurrentStep('configure')
     } else if (currentStep === 'deploy') {
       setCurrentStep('validate')
+    }
+  }
+
+  const checkDependencies = async (): Promise<boolean> => {
+    if (!selectedDeviceId) return false
+
+    setDependenciesLoading(true)
+    setDependenciesError(null)
+    try {
+      const result = await apiClient.checkRecipeDependencies(recipe.slug, selectedDeviceId)
+      setDependencies(result)
+      return true
+    } catch (err) {
+      setDependenciesError(err instanceof Error ? err.message : 'Failed to check dependencies')
+      toast.error('Failed to check dependencies', {
+        description: err instanceof Error ? err.message : 'Please try again'
+      })
+      return false
+    } finally {
+      setDependenciesLoading(false)
     }
   }
 
@@ -149,6 +187,8 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
     setSelectedDeviceId('')
     setConfig({})
     setDeploymentId('')
+    setDependencies(null)
+    setDependenciesError(null)
     validateDeployment.reset()
     createDeployment.reset()
     onOpenChange(false)
@@ -157,6 +197,7 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
   const renderStepIndicator = () => {
     const steps = [
       { id: 'select-device', label: 'Device' },
+      { id: 'dependencies', label: 'Dependencies' },
       { id: 'configure', label: 'Configure' },
       { id: 'validate', label: 'Validate' },
       { id: 'deploy', label: 'Deploy' },
@@ -300,6 +341,17 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
               value={config[option.name] || ''}
               onChange={(e) => handleConfigChange(option.name, Number(e.target.value))}
               placeholder={option.description}
+            />
+          )}
+
+          {(option.type === 'password' || option.type === 'secret') && (
+            <Input
+              id={option.name}
+              type="password"
+              value={config[option.name] || ''}
+              onChange={(e) => handleConfigChange(option.name, e.target.value)}
+              placeholder={option.description}
+              autoComplete="new-password"
             />
           )}
 
@@ -606,6 +658,143 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
     return null
   }
 
+  const renderDependencies = () => (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        {dependenciesLoading
+          ? 'Checking what needs to be set up...'
+          : dependencies?.satisfied
+          ? 'All dependencies are already satisfied!'
+          : "We'll automatically set these up for you"}
+      </p>
+
+      {dependenciesLoading && (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {dependenciesError && (
+        <div className="p-4 bg-destructive/10 rounded-lg border border-border space-y-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-destructive font-medium">Failed to check dependencies</p>
+              <p className="text-sm text-destructive/80 mt-1">{dependenciesError}</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={checkDependencies}
+            disabled={dependenciesLoading}
+            className="w-full"
+          >
+            {dependenciesLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Retrying...
+              </>
+            ) : (
+              'Retry'
+            )}
+          </Button>
+        </div>
+      )}
+
+      {!dependenciesLoading && !dependenciesError && dependencies && (
+        <>
+          {dependencies.satisfied ? (
+            <div className="flex items-center gap-2 p-4 bg-green-500/10 text-green-700 dark:text-green-400 rounded-lg border-border">
+              <Check className="w-5 h-5 flex-shrink-0" />
+              <p className="text-sm">
+                All dependencies are satisfied. You're ready to deploy!
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {dependencies.to_provision.map((dep, index) => (
+                <div
+                  key={index}
+                  className="p-4 border border-border rounded-lg space-y-2 bg-card"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="text-2xl">{getDependencyIcon(dep.type)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium capitalize">
+                          {getDependencyName(dep)}
+                        </h4>
+                        {dep.engine && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-secondary/20 text-secondary-foreground">
+                            {dep.engine}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {dep.purpose || dep.message || `Provides ${dep.type.replace('_', ' ')} functionality`}
+                      </p>
+                      <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                        {dep.estimated_time_seconds && (
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Est. {formatTime(dep.estimated_time_seconds)}
+                          </div>
+                        )}
+                        {dep.estimated_ram_mb && (
+                          <div className="flex items-center gap-1">
+                            <Cpu className="w-3 h-3" />
+                            {formatRAM(dep.estimated_ram_mb)} RAM
+                          </div>
+                        )}
+                        {dep.estimated_storage_gb && (
+                          <div className="flex items-center gap-1">
+                            <HardDrive className="w-3 h-3" />
+                            {dep.estimated_storage_gb}GB storage
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs px-2 py-1 rounded-md bg-muted text-muted-foreground flex-shrink-0">
+                      Auto-deploy
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Total Summary */}
+              {dependencies.to_provision.length > 0 && (
+                <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                  <h4 className="font-medium mb-2">Total Requirements</h4>
+                  <div className="flex items-center gap-4 text-sm">
+                    {dependencies.total_estimated_time_seconds > 0 && (
+                      <div className="flex items-center gap-1">
+                        <Clock className="w-4 h-4" />
+                        ~{formatTime(dependencies.total_estimated_time_seconds)}
+                      </div>
+                    )}
+                    {dependencies.total_estimated_ram_mb > 0 && (
+                      <div className="flex items-center gap-1">
+                        <Cpu className="w-4 h-4" />
+                        {formatRAM(dependencies.total_estimated_ram_mb)} RAM
+                      </div>
+                    )}
+                    {dependencies.total_estimated_storage_gb > 0 && (
+                      <div className="flex items-center gap-1">
+                        <HardDrive className="w-4 h-4" />
+                        {dependencies.total_estimated_storage_gb}GB storage
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-[600px]">
@@ -618,6 +807,7 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
 
         <div className="py-4">
           {currentStep === 'select-device' && renderSelectDevice()}
+          {currentStep === 'dependencies' && renderDependencies()}
           {currentStep === 'configure' && renderConfigure()}
           {currentStep === 'validate' && renderValidate()}
           {currentStep === 'deploy' && renderDeploy()}
@@ -636,12 +826,22 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
                 <Button
                   onClick={handleNext}
                   disabled={
-                    (currentStep === 'select-device' && !selectedDeviceId) ||
+                    (currentStep === 'select-device' && (!selectedDeviceId || dependenciesLoading)) ||
+                    (currentStep === 'dependencies' && (dependenciesLoading || !!dependenciesError)) ||
                     (currentStep === 'validate' && validateDeployment.isPending) ||
                     (currentStep === 'validate' && !validateDeployment.data?.valid)
                   }
                 >
-                  {currentStep === 'validate' ? 'Continue' : 'Next'}
+                  {dependenciesLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Checking...
+                    </>
+                  ) : currentStep === 'validate' ? (
+                    'Continue'
+                  ) : (
+                    'Next'
+                  )}
                 </Button>
               )}
             </div>

@@ -7,6 +7,14 @@ category: productivity
 tagline: "Self-hosted file sync and share"
 description: "Complete self-hosted productivity platform with file sync, calendar, contacts, and more."
 
+# SaaS Replacements
+saas_replacements:
+  - name: "Google Drive"
+    comparison_url: "https://nextcloud.com"
+  - name: "Dropbox"
+  - name: "OneDrive"
+  - name: "iCloud Drive"
+
 # Branding
 author: NextCloud GmbH
 website: https://nextcloud.com

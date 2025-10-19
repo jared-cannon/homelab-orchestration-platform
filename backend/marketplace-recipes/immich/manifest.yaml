@@ -1,0 +1,191 @@
+# Immich - Self-hosted Google Photos Alternative
+# This is an enhanced recipe demonstrating all new curated marketplace features
+
+# Required fields
+id: immich
+name: Immich
+version: 1.94.1
+slug: immich
+category: media
+tagline: "Self-hosted Google Photos alternative with AI-powered features"
+description: |
+  High-performance self-hosted photo and video management solution with mobile apps.
+  Features AI-powered face recognition, object detection, and automatic backup from mobile devices.
+  Perfect replacement for Google Photos with unlimited storage on your own hardware.
+
+# Branding
+icon_url: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/immich.png"
+author: "Immich Contributors"
+website: "https://immich.app"
+source_code: "https://github.com/immich-app/immich"
+
+# Resource requirements (intelligent scheduler)
+requirements:
+  memory:
+    minimum: "2GB"
+    recommended: "4GB"
+  storage:
+    minimum: "20GB"
+    recommended: "500GB"  # Depends on photo library size
+    type: "any"  # SSD recommended for better performance
+  cpu:
+    minimum_cores: 2
+    recommended_cores: 4
+  reliability: "high"
+  always_on: true
+
+# Database provisioning - uses shared Postgres instance
+database:
+  engine: "postgres"
+  auto_provision: true
+  version: "15"
+  env_prefix: "DB_"
+
+# Cache provisioning - uses shared Redis instance
+cache:
+  engine: "redis"
+  auto_provision: true
+  version: "7"
+
+# Volume configuration
+volumes:
+  immich-uploads:
+    description: "User uploaded photos and videos"
+    size_estimate: "500GB"
+    backup_priority: "high"
+    backup_frequency: "daily"
+  immich-library:
+    description: "Processed photo library"
+    size_estimate: "500GB"
+    backup_priority: "high"
+    backup_frequency: "daily"
+
+# Curated Marketplace Features (NEW)
+saas_replacements:
+  - name: "Google Photos"
+    comparison_url: "https://immich.app/docs/overview/introduction"
+  - name: "iCloud Photos"
+  - name: "Amazon Photos"
+
+difficulty_level: "beginner"
+setup_time_minutes: 5
+
+feature_highlights:
+  - "Unlimited storage (limited only by your hardware)"
+  - "AI-powered face recognition and object detection"
+  - "Native mobile apps for iOS and Android"
+  - "Automatic photo backup from mobile devices"
+  - "Album sharing and collaboration"
+  - "Timeline view with map integration"
+  - "Advanced search with AI tags"
+  - "Video transcoding and thumbnail generation"
+  - "Multi-user support with access controls"
+  - "Privacy-focused - your photos never leave your server"
+
+# Dependency Auto-Provisioning (NEW)
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+      alternatives: [caddy, nginx-proxy-manager]
+      purpose: "Provides HTTPS and domain routing for web interface and mobile apps"
+      message: "Immich requires a reverse proxy for secure HTTPS access"
+
+    - type: database
+      engine: postgres
+      auto_provision: true
+      shared: true
+      purpose: "Stores photo metadata, user data, and AI recognition results"
+
+    - type: cache
+      engine: redis
+      auto_provision: true
+      shared: true
+      purpose: "Improves performance for thumbnail generation and caching"
+
+  recommended:
+    - type: backup
+      for_volumes: [immich-uploads, immich-library]
+      message: "Highly recommended: Enable automated backups to protect your photo library"
+
+# User-configurable options
+config_options:
+  - name: domain
+    label: "Domain"
+    type: string
+    default: "photos.homelab.local"
+    required: true
+    description: "Domain for accessing Immich (used by mobile apps)"
+
+  - name: port
+    label: "Port"
+    type: number
+    default: 2283
+    required: true
+    description: "Port for Immich server (default: 2283)"
+
+  - name: upload_location
+    label: "Upload Location"
+    type: string
+    default: "/var/lib/immich/uploads"
+    required: false
+    description: "Path on server where original files are stored"
+
+  - name: enable_machine_learning
+    label: "Enable Machine Learning"
+    type: boolean
+    default: true
+    required: false
+    description: "Enable AI-powered face recognition and object detection"
+
+  - name: enable_video_transcoding
+    label: "Enable Video Transcoding"
+    type: boolean
+    default: true
+    required: false
+    description: "Transcode videos for better compatibility and streaming"
+
+# Post-deployment automation
+post_install:
+  - type: message
+    title: "Immich Successfully Deployed"
+    message: |
+      Immich is now running and ready to use!
+
+      Web Access: https://${DOMAIN}
+
+      Mobile App Setup:
+      1. Download Immich app from App Store (iOS) or Play Store (Android)
+      2. Open app and enter server URL: https://${DOMAIN}
+      3. Create your account or login
+      4. Enable automatic photo backup in app settings
+
+      First Steps:
+      - Create an admin account by visiting the web interface
+      - Configure backup settings in the mobile app
+      - Start uploading your photo library
+
+      Tips:
+      - Photos are stored in ${UPLOAD_LOCATION}
+      - Machine learning features will process photos in the background
+      - Check the admin panel for storage usage and system health
+
+  - type: message
+    title: "Mobile Apps Available"
+    message: |
+      Download Immich mobile apps:
+      - iOS: https://apps.apple.com/app/immich/id1613945652
+      - Android: https://play.google.com/store/apps/details?id=app.alextran.immich
+
+# Health monitoring
+health:
+  endpoint: "/api/server-info/ping"
+  interval: "60s"
+  timeout: "10s"
+  unhealthy_threshold: 3
+
+# Update configuration
+updates:
+  strategy: "notify"  # Notify but don't auto-update (breaking changes possible)
+  backup_before_update: true
+  rollback_on_failure: true

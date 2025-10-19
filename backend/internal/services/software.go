@@ -69,7 +69,7 @@ func (s *SoftwareService) InstallDocker(deviceID uuid.UUID, addUserToGroup bool)
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Check if already installed
 	installed, version, _ := s.IsInstalled(host, models.SoftwareDocker)
@@ -166,7 +166,7 @@ func (s *SoftwareService) InstallNFSServer(deviceID uuid.UUID) (*models.Installe
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Check if already installed
 	installed, _, _ := s.IsInstalled(host, models.SoftwareNFSServer)
@@ -227,7 +227,7 @@ func (s *SoftwareService) InstallNFSClient(deviceID uuid.UUID) (*models.Installe
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Check if already installed
 	installed, _, _ := s.IsInstalled(host, models.SoftwareNFSClient)
@@ -290,7 +290,7 @@ func (s *SoftwareService) DetectInstalled(deviceID uuid.UUID) ([]models.Installe
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Software] Detecting installed software on %s", device.Name)
 
@@ -370,7 +370,7 @@ func (s *SoftwareService) CheckUpdates(deviceID uuid.UUID) ([]models.SoftwareUpd
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Get installed software
 	var installedSoftware []models.InstalledSoftware
@@ -425,7 +425,7 @@ func (s *SoftwareService) UpdateSoftware(deviceID uuid.UUID, softwareName models
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Get software definition
 	def, err := s.registry.GetDefinition(string(softwareName))
@@ -451,7 +451,7 @@ func (s *SoftwareService) UpdateSoftware(deviceID uuid.UUID, softwareName models
 		_, testErr := s.sshClient.Execute(host, "sudo -n true")
 		if testErr != nil {
 			log.Printf("[Software] Passwordless sudo check failed for update on %s", device.Name)
-			return nil, models.NewSudoError(device.IPAddress)
+			return nil, models.NewSudoError(device.GetPrimaryAddress())
 		}
 	}
 
@@ -522,10 +522,10 @@ func (s *SoftwareService) executeInstallation(installation *models.SoftwareInsta
 		}
 	}()
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 	softwareName := installation.SoftwareName
 
-	s.appendInstallLog(installation, fmt.Sprintf("▶ Starting installation of %s on device %s (%s)", def.Name, device.Name, device.IPAddress))
+	s.appendInstallLog(installation, fmt.Sprintf("▶ Starting installation of %s on device %s (%s)", def.Name, device.Name, device.GetPrimaryAddress()))
 	s.updateInstallStatus(installation, models.InstallationStatusInstalling, "")
 
 	// Check if already installed
@@ -663,7 +663,7 @@ func (s *SoftwareService) Uninstall(deviceID uuid.UUID, softwareName models.Soft
 		return err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Software] Uninstalling %s from %s", softwareName, device.Name)
 

@@ -328,7 +328,7 @@ func TestDeviceAPI_UpdateDevice(t *testing.T) {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		err = json.Unmarshal(bodyBytes, &updated)
 		assert.NoError(t, err)
-		assert.Equal(t, "192.168.1.111", updated.IPAddress)
+		assert.Equal(t, "192.168.1.111", updated.LocalIPAddress)
 	})
 
 	t.Run("Reject invalid IP address on update", func(t *testing.T) {

@@ -54,7 +54,7 @@ func TestDeploymentService_ParseMemoryRequirement(t *testing.T) {
 	credService, _ := NewCredentialService()
 	deviceService := NewDeviceService(db, credService, nil)
 	mockRecipeLoader := NewMockRecipeLoader(map[string]*models.Recipe{})
-	deploymentService := NewDeploymentService(db, nil, mockRecipeLoader, deviceService, credService, nil)
+	deploymentService := NewDeploymentService(db, nil, mockRecipeLoader, deviceService, credService, nil, nil, nil)
 
 	tests := []struct {
 		input    string
@@ -82,7 +82,7 @@ func TestDeploymentService_ParseStorageRequirement(t *testing.T) {
 	credService, _ := NewCredentialService()
 	deviceService := NewDeviceService(db, credService, nil)
 	mockRecipeLoader := NewMockRecipeLoader(map[string]*models.Recipe{})
-	deploymentService := NewDeploymentService(db, nil, mockRecipeLoader, deviceService, credService, nil)
+	deploymentService := NewDeploymentService(db, nil, mockRecipeLoader, deviceService, credService, nil, nil, nil)
 
 	tests := []struct {
 		input    string
@@ -174,7 +174,7 @@ func TestDeploymentService_CreateDeploymentAutoSelectDevice(t *testing.T) {
 	})
 
 	deviceService := NewDeviceService(db, credService, nil)
-	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil)
+	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil, nil, nil)
 
 	// Test auto-select device (should select device2 as it has more resources)
 	req := CreateDeploymentRequest{
@@ -272,7 +272,7 @@ func TestDeploymentService_RecommendDevicesForRecipe(t *testing.T) {
 	})
 
 	deviceService := NewDeviceService(db, credService, nil)
-	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil)
+	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil, nil, nil)
 
 	recommendations, err := deploymentService.RecommendDevicesForRecipe("test-app")
 	require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestDeploymentService_RecommendDevices_InsufficientResources(t *testing.T) 
 	})
 
 	deviceService := NewDeviceService(db, credService, nil)
-	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil)
+	deploymentService := NewDeploymentService(db, nil, recipeLoader, deviceService, credService, nil, nil, nil)
 
 	recommendations, err := deploymentService.RecommendDevicesForRecipe("heavy-app")
 	require.NoError(t, err)

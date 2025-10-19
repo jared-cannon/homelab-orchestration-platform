@@ -106,7 +106,7 @@ func (s *MarketplaceService) ValidateDeployment(recipeSlug string, deviceID uuid
 	}
 
 	// Check resources via SSH
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Check Docker installation and status
 	dockerInstalled, _, err := s.validator.DockerInstalled(host)
@@ -257,4 +257,125 @@ func (s *MarketplaceService) renderComposePreview(recipe *models.Recipe, config 
 // CheckForUpdates checks all recipe sources for available updates
 func (s *MarketplaceService) CheckForUpdates() (map[string][]string, error) {
 	return s.recipeLoader.CheckForUpdates()
+}
+
+// CuratedMarketplaceResponse contains curated recipes with user deployment status
+type CuratedMarketplaceResponse struct {
+	Recipes          []*CuratedRecipeWithStatus `json:"recipes"`
+	UserDeployments  map[string]*DeploymentInfo `json:"user_deployments"` // Keyed by recipe slug
+	Stats            *CuratedMarketplaceStats   `json:"stats"`
+}
+
+// CuratedRecipeWithStatus contains recipe info and deployment status
+type CuratedRecipeWithStatus struct {
+	*models.Recipe
+}
+
+// DeploymentInfo contains deployment status for a recipe
+type DeploymentInfo struct {
+	Status     models.DeploymentStatus `json:"status"` // "running", "pending", "failed", etc.
+	DeviceName string                  `json:"device_name"`
+	AccessURL  string                  `json:"access_url,omitempty"`
+	DeployedAt *string                 `json:"deployed_at,omitempty"` // ISO 8601 timestamp
+}
+
+// CuratedMarketplaceStats contains aggregate statistics
+type CuratedMarketplaceStats struct {
+	TotalCurated int `json:"total_curated"`
+	Deployed     int `json:"deployed"`
+	Percentage   int `json:"percentage"`
+}
+
+// GetCuratedMarketplace returns curated recipes with user deployment status
+// TODO: Add userID parameter when multi-user support is implemented to filter deployments by user
+func (s *MarketplaceService) GetCuratedMarketplace() (*CuratedMarketplaceResponse, error) {
+	// Get all recipes
+	allRecipes := s.recipeLoader.ListRecipes()
+
+	// Filter to curated recipes (those with SaaS replacements)
+	var curatedRecipes []*models.Recipe
+	for _, recipe := range allRecipes {
+		if len(recipe.SaaSReplacements) > 0 {
+			curatedRecipes = append(curatedRecipes, recipe)
+		}
+	}
+
+	// Get all deployments
+	// TODO: Filter by userID when multi-user support is added: .Where("user_id = ?", userID)
+	var deployments []models.Deployment
+	if err := s.db.Preload("Device").Find(&deployments).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch deployments: %w", err)
+	}
+
+	// Create deployment map keyed by recipe slug
+	deploymentMap := make(map[string]*DeploymentInfo)
+	deployedCount := 0
+
+	for i := range deployments {
+		deployment := &deployments[i]
+
+		// Only include running deployments in the map
+		if deployment.Status == models.DeploymentStatusRunning {
+			var accessURL string
+			if deployment.Domain != "" {
+				// Use HTTPS if domain is configured
+				accessURL = "https://" + deployment.Domain
+			} else if deployment.ExternalPort > 0 && deployment.Device != nil {
+				// Fall back to IP:port
+				accessURL = fmt.Sprintf("http://%s:%d", deployment.Device.GetPrimaryAddress(), deployment.ExternalPort)
+			}
+
+			deployedAt := ""
+			if deployment.DeployedAt != nil {
+				deployedAt = deployment.DeployedAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+
+			deviceName := ""
+			if deployment.Device != nil {
+				deviceName = deployment.Device.Name
+			}
+
+			deploymentMap[deployment.RecipeSlug] = &DeploymentInfo{
+				Status:     deployment.Status,
+				DeviceName: deviceName,
+				AccessURL:  accessURL,
+				DeployedAt: &deployedAt,
+			}
+
+			// Check if this recipe is in our curated list
+			for _, recipe := range curatedRecipes {
+				if recipe.Slug == deployment.RecipeSlug {
+					deployedCount++
+					break
+				}
+			}
+		}
+	}
+
+	// Build response
+	recipesWithStatus := make([]*CuratedRecipeWithStatus, len(curatedRecipes))
+	for i, recipe := range curatedRecipes {
+		recipesWithStatus[i] = &CuratedRecipeWithStatus{
+			Recipe: recipe,
+		}
+	}
+
+	// Calculate stats
+	totalCurated := len(curatedRecipes)
+	percentage := 0
+	if totalCurated > 0 {
+		percentage = (deployedCount * 100) / totalCurated
+	}
+
+	stats := &CuratedMarketplaceStats{
+		TotalCurated: totalCurated,
+		Deployed:     deployedCount,
+		Percentage:   percentage,
+	}
+
+	return &CuratedMarketplaceResponse{
+		Recipes:         recipesWithStatus,
+		UserDeployments: deploymentMap,
+		Stats:           stats,
+	}, nil
 }

@@ -244,7 +244,7 @@ export function DeviceDetailPage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
                 {device.name}
               </h1>
-              <p className="mt-2 text-muted-foreground font-mono">{device.ip_address}</p>
+              <p className="mt-2 text-muted-foreground font-mono">{device.local_ip_address}</p>
             </div>
 
             <div className="flex items-center gap-3">

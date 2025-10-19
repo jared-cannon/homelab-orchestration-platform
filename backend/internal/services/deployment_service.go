@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -16,6 +17,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// Typed errors for dependency checking
+var (
+	ErrRecipeNotFound           = errors.New("recipe not found")
+	ErrRecipeValidationFailed   = errors.New("recipe validation failed")
+	ErrDependencyServiceNotInit = errors.New("dependency service not initialized")
+	ErrDependencyCheckFailed    = errors.New("failed to check dependencies")
+)
+
+// Configuration constants
+const (
+	// DependencyCheckTimeout is the maximum time to wait for dependency checks
+	// This prevents hanging when checking complex dependency trees or slow network conditions
+	DependencyCheckTimeout = 60 * time.Second
+)
+
 // DeploymentService handles deployment operations
 type DeploymentService struct {
 	db                 *gorm.DB
@@ -26,6 +42,8 @@ type DeploymentService struct {
 	firewallService    *FirewallService
 	deviceScorer       *DeviceScorer
 	dbPoolManager      *DatabasePoolManager
+	cachePoolManager   *CachePoolManager
+	dependencyService  *DependencyService
 	environmentBuilder *EnvironmentBuilder
 	configValidator    *ConfigValidator
 	deviceLocks        sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
@@ -50,8 +68,40 @@ func NewDeploymentService(
 	deviceService *DeviceService,
 	credService *CredentialService,
 	wsHub WSHub,
+	infraConfig *InfrastructureConfig,
+	orchestrator ContainerOrchestrator,
 ) *DeploymentService {
-	dbPoolManager := NewDatabasePoolManager(db, sshClient, credService)
+	// Initialize pool managers with infraConfig and orchestrator
+	dbPoolManager := NewDatabasePoolManager(db, sshClient, credService, infraConfig, orchestrator)
+	cachePoolManager := NewCachePoolManager(db, sshClient, infraConfig, orchestrator)
+
+	// Initialize services for DependencyService
+	// For software registry, use default path (will be overridden if already initialized in main)
+	softwareRegistry := NewSoftwareRegistry("./software-definitions")
+	softwareService := NewSoftwareService(db, sshClient, softwareRegistry, wsHub)
+
+	// Safe type assertion with fallback
+	var recipeLoaderImpl *RecipeLoader
+	if rl, ok := recipeLoader.(*RecipeLoader); ok {
+		recipeLoaderImpl = rl
+	} else {
+		// This should not happen in production, but handle gracefully
+		log.Printf("[Warning] RecipeProvider is not *RecipeLoader, dependency service may not work correctly")
+		recipeLoaderImpl = nil
+	}
+
+	// Initialize dependency service with all required dependencies and orchestrator
+	dependencyService := NewDependencyService(
+		db,
+		sshClient,
+		recipeLoaderImpl,
+		deviceService,
+		softwareService,
+		dbPoolManager,
+		cachePoolManager,
+		infraConfig,
+		orchestrator,
+	)
 
 	return &DeploymentService{
 		db:                 db,
@@ -62,6 +112,8 @@ func NewDeploymentService(
 		firewallService:    NewFirewallService(sshClient),
 		deviceScorer:       NewDeviceScorer(db, sshClient),
 		dbPoolManager:      dbPoolManager,
+		cachePoolManager:   cachePoolManager,
+		dependencyService:  dependencyService,
 		environmentBuilder: NewEnvironmentBuilder(credService, dbPoolManager),
 		configValidator:    NewConfigValidator(),
 	}
@@ -302,7 +354,7 @@ func (s *DeploymentService) DeleteDeployment(id string) error {
 
 	// Stop and remove containers
 	if deployment.ComposeProject != "" {
-		host := fmt.Sprintf("%s:22", device.IPAddress)
+		host := device.GetSSHHost()
 		deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 		// Stop and remove the compose project (WITHOUT removing volumes to preserve data)
@@ -420,7 +472,7 @@ func (s *DeploymentService) RestartDeployment(id string) error {
 		return fmt.Errorf("failed to get device: %w", err)
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Use appropriate command based on current status
@@ -464,7 +516,7 @@ func (s *DeploymentService) StopDeployment(id string) error {
 		return fmt.Errorf("failed to get device: %w", err)
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Stop containers (keeps containers and volumes)
@@ -500,7 +552,7 @@ func (s *DeploymentService) StartDeployment(id string) error {
 		return fmt.Errorf("failed to get device: %w", err)
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Start containers
@@ -544,7 +596,7 @@ func (s *DeploymentService) GetAccessURLs(id string) ([]map[string]interface{}, 
 				protocol = "https"
 			}
 
-			url := fmt.Sprintf("%s://%s:%d", protocol, device.IPAddress, spec.Port)
+			url := fmt.Sprintf("%s://%s:%d", protocol, device.GetPrimaryAddress(), spec.Port)
 
 			// Add description - only label ports we're absolutely certain about
 			// Recipe-specific port descriptions will be added in a future enhancement
@@ -591,7 +643,7 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	deviceLock.Lock()
 	defer deviceLock.Unlock()
 
-	s.appendLog(deployment, fmt.Sprintf("Starting deployment of %s to device %s (%s)", recipe.Name, device.Name, device.IPAddress))
+	s.appendLog(deployment, fmt.Sprintf("Starting deployment of %s to device %s (%s)", recipe.Name, device.Name, device.GetPrimaryAddress()))
 	s.appendLog(deployment, fmt.Sprintf("Acquired deployment lock for device %s", device.Name))
 
 	// Update status to preparing
@@ -603,6 +655,44 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 		s.appendLog(deployment, fmt.Sprintf("❌ Failed to parse config: %v", err))
 		s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to parse config: %v", err))
 		return
+	}
+
+	// DEPENDENCY AUTO-PROVISIONING: Check and provision dependencies
+	if len(recipe.Dependencies.Required) > 0 || len(recipe.Dependencies.Recommended) > 0 {
+		s.appendLog(deployment, "Checking dependencies...")
+		depResult, err := s.dependencyService.CheckDependencies(ctx, recipe, device.ID)
+		if err != nil {
+			s.appendLog(deployment, fmt.Sprintf("❌ Failed to check dependencies: %v", err))
+			s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to check dependencies: %v", err))
+			return
+		}
+
+		// If there are dependencies to provision
+		if len(depResult.ToProvision) > 0 {
+			s.appendLog(deployment, fmt.Sprintf("Auto-provisioning %d dependencies...", len(depResult.ToProvision)))
+			s.appendLog(deployment, depResult.ResourceImpact.Breakdown)
+
+			// Progress callback for dependency provisioning
+			progressCallback := func(step int, total int, message string) {
+				s.appendLog(deployment, fmt.Sprintf("[%d/%d] %s", step, total, message))
+			}
+
+			// Provision dependencies
+			if err := s.dependencyService.ProvisionDependencies(ctx, depResult, device.ID, recipe, progressCallback); err != nil {
+				s.appendLog(deployment, fmt.Sprintf("❌ Failed to provision dependencies: %v", err))
+				s.updateStatus(deployment, models.DeploymentStatusFailed, fmt.Sprintf("Failed to provision dependencies: %v", err))
+				return
+			}
+
+			s.appendLog(deployment, "✓ All dependencies provisioned successfully")
+		} else {
+			s.appendLog(deployment, "✓ All dependencies satisfied")
+		}
+
+		// Show warnings if any
+		for _, warning := range depResult.Warnings {
+			s.appendLog(deployment, fmt.Sprintf("⚠️  %s", warning))
+		}
 	}
 
 	// INTELLIGENT ORCHESTRATION: Database Provisioning
@@ -784,7 +874,7 @@ func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[st
 
 // ensureProxyNetworkExists ensures the homelab-proxy network exists on the target device
 func (s *DeploymentService) ensureProxyNetworkExists(device *models.Device) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Check if network exists using Docker's native filtering (more portable than grep)
 	checkCmd := "docker network ls --filter name=^homelab-proxy$ --format '{{.Name}}'"
@@ -810,7 +900,7 @@ func (s *DeploymentService) deployToDevice(device *models.Device, projectName, c
 
 // deployToDeviceWithEnv deploys docker-compose.yaml + .env file to the target device
 func (s *DeploymentService) deployToDeviceWithEnv(device *models.Device, projectName, composeContent, envFileContent string) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Use home directory instead of /opt to avoid needing sudo
 	// ~/homelab-deployments is user-writable and Docker can still access it
@@ -851,7 +941,7 @@ func (s *DeploymentService) deployToDeviceWithEnv(device *models.Device, project
 
 // checkDeploymentHealth performs health check on the deployment
 func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deployment *models.Deployment, recipe *models.Recipe) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Step 1: Check if containers are running
@@ -889,7 +979,7 @@ func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deploym
 		}
 
 		// Build health check URL
-		healthURL := fmt.Sprintf("http://%s:%d%s", device.IPAddress, port, recipe.HealthCheck.Path)
+		healthURL := fmt.Sprintf("http://%s:%d%s", device.GetPrimaryAddress(), port, recipe.HealthCheck.Path)
 
 		// Use curl with timeout on the target device
 		timeout := recipe.HealthCheck.TimeoutSeconds
@@ -928,7 +1018,7 @@ func (s *DeploymentService) checkDeploymentHealth(device *models.Device, deploym
 
 // cleanupFailedDeployment attempts to clean up a failed deployment
 func (s *DeploymentService) cleanupFailedDeployment(device *models.Device, projectName string) {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 
 	log.Printf("[Deployment] Cleaning up failed deployment: %s", projectName)
@@ -1026,9 +1116,9 @@ func (s *DeploymentService) TroubleshootDeployment(id string) (map[string]interf
 	troubleshoot["deployment_id"] = deployment.ID
 	troubleshoot["deployment_status"] = deployment.Status
 	troubleshoot["device_name"] = device.Name
-	troubleshoot["device_ip"] = device.IPAddress
+	troubleshoot["device_ip"] = device.GetPrimaryAddress()
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", deployment.ComposeProject)
 
 	// Check container status
@@ -1148,4 +1238,35 @@ func (s *DeploymentService) cleanupFirewallPorts(device *models.Device, deletedD
 	}
 
 	return nil
+}
+
+// CheckRecipeDependencies checks dependencies for a recipe before deployment
+// This allows frontends to preview what will be auto-provisioned
+func (s *DeploymentService) CheckRecipeDependencies(recipeSlug string, deviceID uuid.UUID) (*DependencyCheckResult, error) {
+	// Nil check for dependency service
+	if s.dependencyService == nil {
+		return nil, ErrDependencyServiceNotInit
+	}
+
+	// Get the recipe
+	recipe, err := s.recipeLoader.GetRecipe(recipeSlug)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrRecipeNotFound, recipeSlug)
+	}
+
+	// Validate recipe
+	if err := recipe.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRecipeValidationFailed, err)
+	}
+
+	// Check dependencies with timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), DependencyCheckTimeout)
+	defer cancel()
+
+	result, err := s.dependencyService.CheckDependencies(ctx, recipe, deviceID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrDependencyCheckFailed, err)
+	}
+
+	return result, nil
 }

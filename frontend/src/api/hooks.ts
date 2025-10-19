@@ -167,6 +167,7 @@ export const marketplaceKeys = {
   recipe: (slug: string) => [...marketplaceKeys.recipes(), slug] as const,
   recipesByCategory: (category?: string) => [...marketplaceKeys.recipes(), { category }] as const,
   categories: () => [...marketplaceKeys.all, 'categories'] as const,
+  curated: () => [...marketplaceKeys.all, 'curated'] as const,
 }
 
 // Marketplace hooks
@@ -204,6 +205,30 @@ export function useRecommendDevice(slug: string) {
     queryKey: [...marketplaceKeys.recipe(slug), 'recommendations'],
     queryFn: () => apiClient.recommendDeviceForRecipe(slug),
     enabled: !!slug,
+  })
+}
+
+export function useCuratedMarketplace() {
+  const queryClient = useQueryClient()
+
+  // Subscribe to WebSocket updates for deployment changes
+  useEffect(() => {
+    const handleDeploymentUpdates = (event: string) => {
+      // When deployments change, refresh curated marketplace to update status
+      if (event === 'deployment:status' || event === 'deployment:created' || event === 'deployment:deleted') {
+        queryClient.invalidateQueries({ queryKey: marketplaceKeys.curated() })
+      }
+    }
+
+    const unsubscribe = wsService.on('deployments', handleDeploymentUpdates)
+    return () => {
+      unsubscribe()
+    }
+  }, [queryClient])
+
+  return useQuery({
+    queryKey: marketplaceKeys.curated(),
+    queryFn: () => apiClient.getCuratedMarketplace(),
   })
 }
 

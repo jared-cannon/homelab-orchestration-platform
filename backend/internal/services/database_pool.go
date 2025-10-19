@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -19,22 +20,26 @@ type DatabasePoolManager struct {
 	db             *gorm.DB
 	sshClient      *ssh.Client
 	credService    *CredentialService
+	infraConfig    *InfrastructureConfig
+	orchestrator   ContainerOrchestrator
 }
 
 // NewDatabasePoolManager creates a new database pool manager
-func NewDatabasePoolManager(db *gorm.DB, sshClient *ssh.Client, credService *CredentialService) *DatabasePoolManager {
+func NewDatabasePoolManager(db *gorm.DB, sshClient *ssh.Client, credService *CredentialService, infraConfig *InfrastructureConfig, orchestrator ContainerOrchestrator) *DatabasePoolManager {
 	return &DatabasePoolManager{
-		db:          db,
-		sshClient:   sshClient,
-		credService: credService,
+		db:           db,
+		sshClient:    sshClient,
+		credService:  credService,
+		infraConfig:  infraConfig,
+		orchestrator: orchestrator,
 	}
 }
 
 // GetOrCreateSharedInstance ensures a shared database instance exists on a device
 // Returns the shared instance, creating and deploying it if necessary
 func (dpm *DatabasePoolManager) GetOrCreateSharedInstance(device *models.Device, engine string, version string) (*models.SharedDatabaseInstance, error) {
-	// Validate engine
-	if err := dpm.validateEngine(engine); err != nil {
+	// Validate engine using infrastructure config
+	if err := dpm.infraConfig.ValidateDatabaseEngine(engine); err != nil {
 		return nil, err
 	}
 
@@ -60,7 +65,7 @@ func (dpm *DatabasePoolManager) GetOrCreateSharedInstance(device *models.Device,
 // createSharedInstance creates and deploys a new shared database instance
 func (dpm *DatabasePoolManager) createSharedInstance(device *models.Device, engine string, version string) (*models.SharedDatabaseInstance, error) {
 	// Generate master credentials
-	masterUsername := dpm.getMasterUsername(engine)
+	masterUsername := dpm.infraConfig.GetMasterUsername(engine)
 	masterPassword, err := dpm.generateSecurePassword(32)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate master password: %w", err)
@@ -72,9 +77,15 @@ func (dpm *DatabasePoolManager) createSharedInstance(device *models.Device, engi
 		return nil, fmt.Errorf("failed to store master credentials: %w", err)
 	}
 
-	// Determine version
+	// Determine version from config if not specified
 	if version == "" {
-		version = dpm.getDefaultVersion(engine)
+		version = dpm.infraConfig.GetDatabaseVersion(engine)
+	}
+
+	// Get configuration for this database engine
+	dbConfig, err := dpm.infraConfig.GetDatabaseConfig(engine)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database config: %w", err)
 	}
 
 	// Create database record
@@ -85,11 +96,11 @@ func (dpm *DatabasePoolManager) createSharedInstance(device *models.Device, engi
 		Status:         "provisioning",
 		ContainerName:  fmt.Sprintf("homelab-%s-shared", engine),
 		ComposeProject: fmt.Sprintf("homelab-%s-shared", engine),
-		Port:           dpm.getDefaultPort(engine),
-		InternalPort:   dpm.getInternalPort(engine),
+		Port:           dbConfig.Port,
+		InternalPort:   dbConfig.InternalPort,
 		MasterUsername: masterUsername,
 		CredentialKey:  credKey,
-		EstimatedRAMMB: dpm.getEstimatedRAM(engine),
+		EstimatedRAMMB: dbConfig.EstimatedRAMMB,
 		DatabaseCount:  0,
 	}
 
@@ -118,14 +129,8 @@ func (dpm *DatabasePoolManager) createSharedInstance(device *models.Device, engi
 
 // deploySharedInstance deploys the Docker container for a shared database instance
 func (dpm *DatabasePoolManager) deploySharedInstance(device *models.Device, instance *models.SharedDatabaseInstance, masterPassword string) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	deployDir := fmt.Sprintf("~/homelab-deployments/%s", instance.ComposeProject)
-
-	// Create deployment directory
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", deployDir)
-	if _, err := dpm.sshClient.ExecuteWithTimeout(host, mkdirCmd, 30*time.Second); err != nil {
-		return fmt.Errorf("failed to create deployment directory: %w", err)
-	}
 
 	// Generate docker-compose.yaml for the shared instance
 	composeContent, err := dpm.generateSharedInstanceCompose(instance, masterPassword)
@@ -133,26 +138,27 @@ func (dpm *DatabasePoolManager) deploySharedInstance(device *models.Device, inst
 		return fmt.Errorf("failed to generate compose file: %w", err)
 	}
 
-	// Write compose file
-	composeFile := fmt.Sprintf("%s/docker-compose.yml", deployDir)
-	writeCmd := fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", composeFile, composeContent)
-	if _, err := dpm.sshClient.ExecuteWithTimeout(host, writeCmd, 1*time.Minute); err != nil {
-		return fmt.Errorf("failed to write compose file: %w", err)
+	// Create deployment spec
+	spec := DeploymentSpec{
+		Host:           host,
+		StackName:      instance.ComposeProject,
+		DeployDir:      deployDir,
+		ComposeContent: composeContent,
+		Timeout:        10 * time.Minute,
 	}
 
-	// Deploy with docker compose
-	deployCmd := fmt.Sprintf("cd %s && docker compose -p %s up -d", deployDir, instance.ComposeProject)
-	output, err := dpm.sshClient.ExecuteWithTimeout(host, deployCmd, 10*time.Minute)
-	if err != nil {
-		return fmt.Errorf("docker compose up failed: %w (output: %s)", err, output)
+	// Deploy using orchestrator
+	ctx := context.Background()
+	if err := dpm.orchestrator.Deploy(ctx, spec); err != nil {
+		return fmt.Errorf("orchestrator deployment failed: %w", err)
 	}
 
 	// Wait for database to be ready
-	if err := dpm.waitForDatabaseReady(host, instance); err != nil {
-		return fmt.Errorf("database failed to become ready: %w", err)
+	if err := dpm.orchestrator.WaitForHealthy(ctx, instance.ComposeProject, host, 5*time.Minute); err != nil {
+		return fmt.Errorf("database failed to become healthy: %w", err)
 	}
 
-	log.Printf("[DatabasePool] Shared %s instance deployed successfully on %s", instance.Engine, device.IPAddress)
+	log.Printf("[DatabasePool] Shared %s instance deployed successfully on %s", instance.Engine, device.GetPrimaryAddress())
 	return nil
 }
 
@@ -172,10 +178,11 @@ func (dpm *DatabasePoolManager) generateSharedInstanceCompose(instance *models.S
 
 // generatePostgresCompose generates docker-compose for shared Postgres instance
 func (dpm *DatabasePoolManager) generatePostgresCompose(instance *models.SharedDatabaseInstance, masterPassword string) string {
+	dockerImage := dpm.infraConfig.GetDatabaseImage("postgres")
 	return fmt.Sprintf(`version: '3.8'
 services:
   postgres:
-    image: postgres:%s
+    image: %s:%s
     container_name: %s
     restart: unless-stopped
     environment:
@@ -194,15 +201,16 @@ services:
 volumes:
   postgres-data:
     driver: local
-`, instance.Version, instance.ContainerName, instance.MasterUsername, masterPassword, instance.Port, instance.InternalPort, instance.MasterUsername)
+`, dockerImage, instance.Version, instance.ContainerName, instance.MasterUsername, masterPassword, instance.Port, instance.InternalPort, instance.MasterUsername)
 }
 
 // generateMySQLCompose generates docker-compose for shared MySQL instance
 func (dpm *DatabasePoolManager) generateMySQLCompose(instance *models.SharedDatabaseInstance, masterPassword string) string {
+	dockerImage := dpm.infraConfig.GetDatabaseImage("mysql")
 	return fmt.Sprintf(`version: '3.8'
 services:
   mysql:
-    image: mysql:%s
+    image: %s:%s
     container_name: %s
     restart: unless-stopped
     environment:
@@ -220,15 +228,16 @@ services:
 volumes:
   mysql-data:
     driver: local
-`, instance.Version, instance.ContainerName, masterPassword, instance.Port, instance.InternalPort, masterPassword)
+`, dockerImage, instance.Version, instance.ContainerName, masterPassword, instance.Port, instance.InternalPort, masterPassword)
 }
 
 // generateMariaDBCompose generates docker-compose for shared MariaDB instance
 func (dpm *DatabasePoolManager) generateMariaDBCompose(instance *models.SharedDatabaseInstance, masterPassword string) string {
+	dockerImage := dpm.infraConfig.GetDatabaseImage("mariadb")
 	return fmt.Sprintf(`version: '3.8'
 services:
   mariadb:
-    image: mariadb:%s
+    image: %s:%s
     container_name: %s
     restart: unless-stopped
     environment:
@@ -246,27 +255,7 @@ services:
 volumes:
   mariadb-data:
     driver: local
-`, instance.Version, instance.ContainerName, masterPassword, instance.Port, instance.InternalPort, masterPassword)
-}
-
-// waitForDatabaseReady waits for the database to be ready to accept connections
-func (dpm *DatabasePoolManager) waitForDatabaseReady(host string, instance *models.SharedDatabaseInstance) error {
-	maxAttempts := 30
-	for i := 0; i < maxAttempts; i++ {
-		// Check container health
-		checkCmd := fmt.Sprintf("docker inspect --format='{{.State.Health.Status}}' %s", instance.ContainerName)
-		output, err := dpm.sshClient.ExecuteWithTimeout(host, checkCmd, 10*time.Second)
-
-		if err == nil && strings.TrimSpace(output) == "healthy" {
-			log.Printf("[DatabasePool] Shared %s instance is healthy", instance.Engine)
-			return nil
-		}
-
-		log.Printf("[DatabasePool] Waiting for %s to be ready (attempt %d/%d)...", instance.Engine, i+1, maxAttempts)
-		time.Sleep(2 * time.Second)
-	}
-
-	return fmt.Errorf("database did not become ready after %d attempts", maxAttempts)
+`, dockerImage, instance.Version, instance.ContainerName, masterPassword, instance.Port, instance.InternalPort, masterPassword)
 }
 
 // ProvisionDatabase creates an isolated database within a shared instance for a deployment
@@ -302,7 +291,7 @@ func (dpm *DatabasePoolManager) ProvisionDatabase(deployment *models.Deployment,
 		DatabaseName:             dbName,
 		Username:                 username,
 		CredentialKey:            credKey,
-		Host:                     device.IPAddress,
+		Host:                     device.GetPrimaryAddress(),
 		Port:                     instance.Port,
 		Status:                   "provisioning",
 	}
@@ -334,7 +323,7 @@ func (dpm *DatabasePoolManager) ProvisionDatabase(deployment *models.Deployment,
 
 // createDatabaseAndUser creates a database and user in the shared instance
 func (dpm *DatabasePoolManager) createDatabaseAndUser(device *models.Device, instance *models.SharedDatabaseInstance, dbName, username, password string) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Get master password
 	masterPassword, err := dpm.credService.GetCredential(instance.CredentialKey)
@@ -382,70 +371,6 @@ docker exec %s mysql -u%s -p%s -e "GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%%'; FL
 }
 
 // Helper methods
-
-func (dpm *DatabasePoolManager) validateEngine(engine string) error {
-	validEngines := map[string]bool{
-		"postgres": true,
-		"mysql":    true,
-		"mariadb":  true,
-	}
-
-	if !validEngines[engine] {
-		return fmt.Errorf("invalid database engine: %s (supported: postgres, mysql, mariadb)", engine)
-	}
-	return nil
-}
-
-func (dpm *DatabasePoolManager) getMasterUsername(engine string) string {
-	switch engine {
-	case "postgres":
-		return "postgres"
-	case "mysql", "mariadb":
-		return "root"
-	default:
-		return "root"
-	}
-}
-
-func (dpm *DatabasePoolManager) getDefaultVersion(engine string) string {
-	switch engine {
-	case "postgres":
-		return "15"
-	case "mysql":
-		return "8.0"
-	case "mariadb":
-		return "10.11"
-	default:
-		return "latest"
-	}
-}
-
-func (dpm *DatabasePoolManager) getDefaultPort(engine string) int {
-	switch engine {
-	case "postgres":
-		return 5432
-	case "mysql", "mariadb":
-		return 3306
-	default:
-		return 5432
-	}
-}
-
-func (dpm *DatabasePoolManager) getInternalPort(engine string) int {
-	// Same as default port for now
-	return dpm.getDefaultPort(engine)
-}
-
-func (dpm *DatabasePoolManager) getEstimatedRAM(engine string) int {
-	switch engine {
-	case "postgres":
-		return 256 // 256MB base
-	case "mysql", "mariadb":
-		return 400 // 400MB base
-	default:
-		return 256
-	}
-}
 
 func (dpm *DatabasePoolManager) generateDatabaseName(recipeSlug string, deploymentID uuid.UUID) string {
 	// Generate a database name like: nextcloud_abc123de
@@ -520,4 +445,120 @@ func (dpm *DatabasePoolManager) calculateRAMSavedPercent(dbCount, savedMB int) f
 		return 0
 	}
 	return (float64(savedMB) / float64(wouldHaveUsed)) * 100
+}
+
+// ====== DEPENDENCY SERVICE INTEGRATION ======
+// These methods provide a clean interface for DependencyService
+
+// SharedInstanceExists checks if a shared database instance exists on a device
+// Used by DependencyService for dependency checking
+func (dpm *DatabasePoolManager) SharedInstanceExists(ctx context.Context, deviceID uuid.UUID, engine string) (bool, error) {
+	var instance models.SharedDatabaseInstance
+	err := dpm.db.WithContext(ctx).Where("device_id = ? AND engine = ? AND status = ?",
+		deviceID, engine, "running").First(&instance).Error
+
+	if err == nil {
+		return true, nil
+	}
+	if err == gorm.ErrRecordNotFound {
+		return false, nil
+	}
+	return false, err
+}
+
+// ProvisionDatabaseInSharedInstance creates a database in a shared instance
+// Used by DependencyService for auto-provisioning
+// This is a context-aware wrapper around ProvisionDatabase
+func (dpm *DatabasePoolManager) ProvisionDatabaseInSharedInstance(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	engine string,
+	dbName string,
+	appSlug string,
+) error {
+	// Get device
+	var device models.Device
+	if err := dpm.db.First(&device, deviceID).Error; err != nil {
+		return fmt.Errorf("failed to get device: %w", err)
+	}
+
+	// Get or create shared instance
+	version := "" // Use default version
+	instance, err := dpm.GetOrCreateSharedInstance(&device, engine, version)
+	if err != nil {
+		return fmt.Errorf("failed to get/create shared instance: %w", err)
+	}
+
+	if instance.Status != "running" {
+		return fmt.Errorf("shared instance is not running (status: %s)", instance.Status)
+	}
+
+	// Generate credentials
+	username := fmt.Sprintf("%s_user", strings.ReplaceAll(appSlug, "-", "_"))
+	password, err := dpm.generateSecurePassword(24)
+	if err != nil {
+		return fmt.Errorf("failed to generate password: %w", err)
+	}
+
+	// Store credentials with app-specific key
+	credKey := fmt.Sprintf("db-%s-%s", appSlug, deviceID.String())
+	if err := dpm.credService.StoreCredential(credKey, password); err != nil {
+		return fmt.Errorf("failed to store credentials: %w", err)
+	}
+
+	// Create database and user in the shared instance
+	if err := dpm.createDatabaseAndUser(&device, instance, dbName, username, password); err != nil {
+		return fmt.Errorf("failed to create database and user: %w", err)
+	}
+
+	// Update shared instance database count
+	dpm.db.Model(instance).Update("database_count", gorm.Expr("database_count + 1"))
+
+	log.Printf("[DatabasePool] Provisioned database %s for app %s in shared %s instance",
+		dbName, appSlug, engine)
+
+	return nil
+}
+
+// GetDatabaseCredentials retrieves database credentials for an app
+// Returns connection details that can be injected into app environment
+func (dpm *DatabasePoolManager) GetDatabaseCredentials(
+	deviceID uuid.UUID,
+	engine string,
+	appSlug string,
+) (map[string]string, error) {
+	// Get device
+	var device models.Device
+	if err := dpm.db.First(&device, deviceID).Error; err != nil {
+		return nil, fmt.Errorf("failed to get device: %w", err)
+	}
+
+	// Get shared instance
+	var instance models.SharedDatabaseInstance
+	err := dpm.db.Where("device_id = ? AND engine = ? AND status = ?",
+		deviceID, engine, "running").First(&instance).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shared instance: %w", err)
+	}
+
+	// Get stored credentials
+	credKey := fmt.Sprintf("db-%s-%s", appSlug, deviceID.String())
+	password, err := dpm.credService.GetCredential(credKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve credentials: %w", err)
+	}
+
+	// Generate database name
+	dbName := fmt.Sprintf("%s_db", strings.ReplaceAll(appSlug, "-", "_"))
+	username := fmt.Sprintf("%s_user", strings.ReplaceAll(appSlug, "-", "_"))
+
+	// Return connection details
+	return map[string]string{
+		"DB_HOST":     device.GetPrimaryAddress(),
+		"DB_PORT":     fmt.Sprintf("%d", instance.Port),
+		"DB_DATABASE": dbName,
+		"DB_USERNAME": username,
+		"DB_PASSWORD": password,
+		"DB_ENGINE":   engine,
+	}, nil
 }

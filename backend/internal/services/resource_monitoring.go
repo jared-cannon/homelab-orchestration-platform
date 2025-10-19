@@ -345,7 +345,7 @@ func (rms *ResourceMonitoringService) pollDevice(device models.Device) bool {
 
 	metrics, err := rms.collectDeviceMetrics(&device)
 	if err != nil {
-		log.Printf("[ResourceMonitoring] Error collecting metrics for device %s (%s): %v", device.Name, device.IPAddress, err)
+		log.Printf("[ResourceMonitoring] Error collecting metrics for device %s (%s): %v", device.Name, device.GetPrimaryAddress(), err)
 
 		// Track consecutive failures
 		rms.failureCountMu.Lock()
@@ -387,7 +387,7 @@ func (rms *ResourceMonitoringService) pollDevice(device models.Device) bool {
 
 // ensureConnection ensures an SSH connection exists for the device
 func (rms *ResourceMonitoringService) ensureConnection(device *models.Device) error {
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 
 	// Check if connection already exists
 	_, err := rms.sshClient.GetConnection(host)
@@ -422,7 +422,7 @@ func (rms *ResourceMonitoringService) ensureConnection(device *models.Device) er
 		return fmt.Errorf("failed to establish SSH connection: %w", connErr)
 	}
 
-	log.Printf("[ResourceMonitoring] Established new SSH connection to %s (%s)", device.Name, device.IPAddress)
+	log.Printf("[ResourceMonitoring] Established new SSH connection to %s (%s)", device.Name, device.GetPrimaryAddress())
 	return nil
 }
 
@@ -433,7 +433,7 @@ func (rms *ResourceMonitoringService) collectDeviceMetrics(device *models.Device
 		return nil, fmt.Errorf("connection failed: %w", err)
 	}
 
-	host := fmt.Sprintf("%s:22", device.IPAddress)
+	host := device.GetSSHHost()
 	metrics := &models.DeviceMetrics{
 		DeviceID:   device.ID,
 		RecordedAt: time.Now(),

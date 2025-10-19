@@ -35,7 +35,7 @@ func (s *VolumeService) CreateLocalVolume(deviceID uuid.UUID, name string) (*mod
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Volume] Creating local volume '%s' on %s", name, device.Name)
 
@@ -102,7 +102,7 @@ func (s *VolumeService) CreateNFSVolume(deviceID uuid.UUID, name, nfsServerIP, n
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Volume] Creating NFS volume '%s' on %s: %s:%s", name, device.Name, nfsServerIP, nfsPath)
 
@@ -184,7 +184,7 @@ func (s *VolumeService) ListVolumes(deviceID uuid.UUID) ([]models.Volume, error)
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Volume] Listing volumes on %s", device.Name)
 
@@ -280,7 +280,7 @@ func (s *VolumeService) GetVolume(deviceID uuid.UUID, volumeName string) (*model
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	// Check if volume is in use
 	inUse, err := s.checkVolumeInUse(host, volumeName)
@@ -300,7 +300,7 @@ func (s *VolumeService) RemoveVolume(deviceID uuid.UUID, volumeName string, forc
 		return err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	log.Printf("[Volume] Removing volume '%s' from %s", volumeName, device.Name)
 
@@ -338,7 +338,7 @@ func (s *VolumeService) InspectVolume(deviceID uuid.UUID, volumeName string) (ma
 		return nil, err
 	}
 
-	host := device.IPAddress + ":22"
+	host := device.GetSSHHost()
 
 	inspectCmd := fmt.Sprintf("docker volume inspect %s", volumeName)
 	output, err := s.sshClient.Execute(host, inspectCmd)

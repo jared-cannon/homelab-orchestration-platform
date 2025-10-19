@@ -47,7 +47,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Test Server",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.100",
+			LocalIPAddress: "192.168.1.100",
 		}
 
 		creds := &DeviceCredentials{
@@ -66,7 +66,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Invalid Device",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "not-an-ip",
+			LocalIPAddress: "not-an-ip",
 		}
 
 		creds := &DeviceCredentials{
@@ -85,7 +85,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device1 := &models.Device{
 			Name:      "Server 1",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.101",
+			LocalIPAddress: "192.168.1.101",
 		}
 		creds := &DeviceCredentials{
 			Type:     "password",
@@ -99,7 +99,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device2 := &models.Device{
 			Name:      "Server 2",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.101", // Same IP
+			LocalIPAddress: "192.168.1.101", // Same IP
 		}
 		err = deviceService.CreateDevice(device2, creds)
 		assert.Error(t, err, "Should reject duplicate IP")
@@ -110,7 +110,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Credential Test",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.102",
+			LocalIPAddress: "192.168.1.102",
 		}
 
 		creds := &DeviceCredentials{
@@ -134,7 +134,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Auto Auth Test",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.108",
+			LocalIPAddress: "192.168.1.108",
 		}
 
 		creds := &DeviceCredentials{
@@ -167,7 +167,7 @@ func TestDeviceService_GetDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Get Test",
 			Type:      models.DeviceTypeNAS,
-			IPAddress: "192.168.1.103",
+			LocalIPAddress: "192.168.1.103",
 		}
 		creds := &DeviceCredentials{
 			Type:     "password",
@@ -182,7 +182,7 @@ func TestDeviceService_GetDevice(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, device.Name, retrieved.Name)
 		assert.Equal(t, device.Type, retrieved.Type)
-		assert.Equal(t, device.IPAddress, retrieved.IPAddress)
+		assert.Equal(t, device.LocalIPAddress, retrieved.LocalIPAddress)
 	})
 
 	t.Run("Returns error for non-existent device", func(t *testing.T) {
@@ -216,12 +216,12 @@ func TestDeviceService_ListDevices(t *testing.T) {
 		device1 := &models.Device{
 			Name:      "Device 1",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.104",
+			LocalIPAddress: "192.168.1.104",
 		}
 		device2 := &models.Device{
 			Name:      "Device 2",
 			Type:      models.DeviceTypeRouter,
-			IPAddress: "192.168.1.105",
+			LocalIPAddress: "192.168.1.105",
 		}
 
 		err := deviceService.CreateDevice(device1, creds)
@@ -247,7 +247,7 @@ func TestDeviceService_UpdateDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "Original Name",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.106",
+			LocalIPAddress: "192.168.1.106",
 		}
 		creds := &DeviceCredentials{
 			Type:     "password",
@@ -282,7 +282,7 @@ func TestDeviceService_DeleteDevice(t *testing.T) {
 		device := &models.Device{
 			Name:      "To Delete",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "192.168.1.107",
+			LocalIPAddress: "192.168.1.107",
 		}
 		creds := &DeviceCredentials{
 			Type:     "password",
@@ -315,7 +315,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Tailscale Device",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "myserver.wolf-bear.ts.net",
+			LocalIPAddress: "myserver.wolf-bear.ts.net",
 		}
 
 		creds := &DeviceCredentials{
@@ -334,7 +334,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Another Tailscale Device",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "api.red-blue.ts.net",
+			LocalIPAddress: "api.red-blue.ts.net",
 		}
 
 		creds := &DeviceCredentials{
@@ -350,7 +350,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Tailscale IP Device",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "100.64.1.5",
+			LocalIPAddress: "100.64.1.5",
 		}
 
 		creds := &DeviceCredentials{
@@ -366,7 +366,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Invalid Tailscale",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "invalid..hostname",
+			LocalIPAddress: "invalid..hostname",
 		}
 
 		creds := &DeviceCredentials{
@@ -383,7 +383,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Regular Device with Hostname",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "myserver.local",
+			LocalIPAddress: "myserver.local",
 		}
 
 		creds := &DeviceCredentials{
@@ -401,7 +401,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 		device := &models.Device{
 			Name:      "Tailscale Cred Test",
 			Type:      models.DeviceTypeServer,
-			IPAddress: "machine.happy-sunny.ts.net",
+			LocalIPAddress: "machine.happy-sunny.ts.net",
 		}
 
 		creds := &DeviceCredentials{

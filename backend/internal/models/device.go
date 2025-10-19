@@ -37,18 +37,28 @@ const (
 	AuthTypeTailscale AuthType = "tailscale" // Tailscale SSH (uses Tailscale's built-in SSH)
 )
 
+// PrimaryConnection represents which connection type to use first
+type PrimaryConnection string
+
+const (
+	PrimaryConnectionLocal     PrimaryConnection = "local"     // Use local IP address first
+	PrimaryConnectionTailscale PrimaryConnection = "tailscale" // Use Tailscale address first
+)
+
 // Device represents a managed device (server, router, NAS, etc.)
 type Device struct {
-	ID            uuid.UUID    `gorm:"type:uuid;primaryKey" json:"id"`
-	Name          string       `gorm:"not null" json:"name"`
-	Type          DeviceType   `gorm:"not null" json:"type"`
-	IPAddress     string       `gorm:"not null;uniqueIndex" json:"ip_address"`
-	MACAddress    string       `json:"mac_address,omitempty"`
-	Status        DeviceStatus `gorm:"default:unknown" json:"status"`
-	Username      string       `gorm:"default:''" json:"username"`              // SSH username (not sensitive)
-	AuthType      AuthType     `gorm:"default:auto" json:"auth_type"`           // Authentication method
-	CredentialKey string       `json:"-"`                                       // Reference to credential in keychain (only for password/ssh_key), never expose in JSON
-	Metadata      []byte       `gorm:"type:json" json:"metadata,omitempty"`
+	ID                uuid.UUID         `gorm:"type:uuid;primaryKey" json:"id"`
+	Name              string            `gorm:"not null" json:"name"`
+	Type              DeviceType        `gorm:"not null" json:"type"`
+	LocalIPAddress    string            `gorm:"not null;uniqueIndex" json:"local_ip_address"`
+	TailscaleAddress  string            `json:"tailscale_address,omitempty"`                           // Tailscale IP or hostname (optional)
+	PrimaryConnection PrimaryConnection `gorm:"default:local" json:"primary_connection"`               // Which connection to try first
+	MACAddress        string            `json:"mac_address,omitempty"`
+	Status            DeviceStatus      `gorm:"default:unknown" json:"status"`
+	Username          string            `gorm:"default:''" json:"username"`              // SSH username (not sensitive)
+	AuthType          AuthType          `gorm:"default:auto" json:"auth_type"`           // Authentication method
+	CredentialKey     string            `json:"-"`                                       // Reference to credential in keychain (only for password/ssh_key), never expose in JSON
+	Metadata          []byte            `gorm:"type:json" json:"metadata,omitempty"`
 
 	// Current resource metrics (updated by ResourceMonitoringService)
 	CPUUsagePercent    *float64   `json:"cpu_usage_percent,omitempty"`
@@ -80,4 +90,28 @@ func (d *Device) BeforeCreate(tx *gorm.DB) error {
 // TableName overrides the default table name
 func (Device) TableName() string {
 	return "devices"
+}
+
+// GetPrimaryAddress returns the primary connection address based on PrimaryConnection setting
+func (d *Device) GetPrimaryAddress() string {
+	if d.PrimaryConnection == PrimaryConnectionTailscale && d.TailscaleAddress != "" {
+		return d.TailscaleAddress
+	}
+	return d.LocalIPAddress
+}
+
+// GetFallbackAddress returns the fallback connection address
+func (d *Device) GetFallbackAddress() string {
+	if d.PrimaryConnection == PrimaryConnectionTailscale {
+		return d.LocalIPAddress
+	}
+	if d.TailscaleAddress != "" {
+		return d.TailscaleAddress
+	}
+	return ""
+}
+
+// GetSSHHost returns the primary SSH connection host (address:22)
+func (d *Device) GetSSHHost() string {
+	return d.GetPrimaryAddress() + ":22"
 }

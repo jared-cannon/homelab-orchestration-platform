@@ -3,7 +3,6 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Server,
   Rocket,
-  ShoppingBag,
   ChevronLeft,
   LogOut,
   User,
@@ -28,11 +27,6 @@ const navItems: NavItem[] = [
     name: 'Apps',
     path: '/apps',
     icon: <Rocket className="w-5 h-5" />,
-  },
-  {
-    name: 'Marketplace',
-    path: '/marketplace',
-    icon: <ShoppingBag className="w-5 h-5" />,
   },
 ]
 

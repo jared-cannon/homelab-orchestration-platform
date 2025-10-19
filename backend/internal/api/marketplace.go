@@ -28,6 +28,7 @@ func NewMarketplaceHandler(marketplaceService *services.MarketplaceService, devi
 func (h *MarketplaceHandler) RegisterRoutes(api fiber.Router) {
 	marketplace := api.Group("/marketplace")
 
+	marketplace.Get("/curated", h.GetCuratedMarketplace)
 	marketplace.Get("/recipes", h.ListRecipes)
 	marketplace.Get("/recipes/:slug", h.GetRecipe)
 	marketplace.Post("/recipes/:slug/validate", h.ValidateDeployment)
@@ -228,6 +229,25 @@ func (h *MarketplaceHandler) ReloadRecipes(c *fiber.Ctx) error {
 		"message": "Recipes reloaded successfully",
 		"count":   len(recipes),
 	})
+}
+
+// GetCuratedMarketplace godoc
+// @Summary Get curated marketplace with deployment status
+// @Description Get curated recipes (SaaS replacements) with user deployment status and progress stats
+// @Tags marketplace
+// @Produce json
+// @Success 200 {object} services.CuratedMarketplaceResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /marketplace/curated [get]
+func (h *MarketplaceHandler) GetCuratedMarketplace(c *fiber.Ctx) error {
+	result, err := h.marketplaceService.GetCuratedMarketplace()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Error: fmt.Sprintf("Failed to fetch curated marketplace: %v", err),
+		})
+	}
+
+	return c.JSON(result)
 }
 
 // parseMemoryRequirement converts memory string (e.g., "512MB", "1GB") to MB
