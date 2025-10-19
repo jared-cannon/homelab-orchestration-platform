@@ -42,6 +42,14 @@ func initDB() (*gorm.DB, error) {
 		return nil, err
 	}
 
+	// Run manual migrations for schema changes that AutoMigrate can't handle
+	if err := models.MigrateDualIPAddresses(db); err != nil {
+		log.Printf("❌ CRITICAL: Database migration failed: %v", err)
+		log.Printf("❌ The application may not function correctly with this schema mismatch")
+		log.Printf("❌ Please check the error above and ensure database migrations can run")
+		// Continue startup but with clear warning that schema may be incorrect
+	}
+
 	// Run auto-migrations
 	err = db.AutoMigrate(
 		&models.User{},
@@ -55,8 +63,10 @@ func initDB() (*gorm.DB, error) {
 		&models.NFSExport{},
 		&models.NFSMount{},
 		&models.Volume{},
-		&models.SharedDatabaseInstance{},  // New: Database pooling
-		&models.ProvisionedDatabase{},     // New: Database pooling
+		&models.SharedDatabaseInstance{},  // Database pooling
+		&models.ProvisionedDatabase{},     // Database pooling
+		&models.SharedCacheInstance{},     // Cache pooling
+		&models.ProvisionedCacheConfig{},  // Cache pooling
 	)
 	if err != nil {
 		return nil, err
@@ -84,6 +94,21 @@ func main() {
 		log.Fatalf("Failed to get database connection: %v", err)
 	}
 	defer sqlDB.Close()
+
+	// Load infrastructure configuration
+	infraConfigPath := os.Getenv("INFRA_CONFIG_PATH")
+	if infraConfigPath == "" {
+		infraConfigPath = "./config/infrastructure-defaults.yaml"
+	}
+	infraConfig, err := services.LoadInfrastructureConfig(infraConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load infrastructure config: %v", err)
+	}
+	log.Printf("⚙️  Infrastructure config loaded (v%s) - Valkey %s, Postgres %s, Traefik %s",
+		infraConfig.Version,
+		infraConfig.GetCacheVersion("valkey"),
+		infraConfig.GetDatabaseVersion("postgres"),
+		infraConfig.GetReverseProxyVersion("traefik"))
 
 	// Initialize services
 	credService, err := services.NewCredentialService()
@@ -125,9 +150,14 @@ func main() {
 	marketplaceService := services.NewMarketplaceService(db, recipeLoader, deviceService, validator, resourceValidator)
 	deviceScorer := services.NewDeviceScorer(db, sshClient)
 
-	// Initialize deployment service with intelligent orchestration
-	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, credService, wsHub)
-	log.Printf("🧠 Intelligent orchestration enabled (device scoring + database pooling)")
+	// Initialize orchestrator based on infrastructure config
+	orchestratorConfig := infraConfig.GetOrchestratorConfig()
+	orchestrator := services.NewOrchestrator(orchestratorConfig, sshClient)
+	log.Printf("🐳 Container orchestrator initialized (mode: %s)", orchestratorConfig.Mode)
+
+	// Initialize deployment service with intelligent orchestration and dependency auto-provisioning
+	deploymentService := services.NewDeploymentService(db, sshClient, recipeLoader, deviceService, credService, wsHub, infraConfig, orchestrator)
+	log.Printf("🧠 Intelligent orchestration enabled (device scoring + database pooling + dependency auto-provisioning)")
 
 	// Initialize health check service
 	healthCheckService := services.NewHealthCheckService(db, sshClient, credService)
@@ -220,8 +250,8 @@ func main() {
 	scannerHandler := api.NewScannerHandler(scannerService)
 	scannerHandler.RegisterRoutes(protectedGroup)
 
-	// Initialize database pool manager for aggregate resources
-	dbPoolManager := services.NewDatabasePoolManager(db, sshClient, credService)
+	// Initialize database pool manager for aggregate resources (with infrastructure config and orchestrator)
+	dbPoolManager := services.NewDatabasePoolManager(db, sshClient, credService, infraConfig, orchestrator)
 
 	// Register resource monitoring routes (with database pooling stats)
 	resourceHandler := api.NewResourceHandler(resourceMonitoring, dbPoolManager)
