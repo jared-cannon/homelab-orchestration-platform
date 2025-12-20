@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   Server,
   Rocket,
+  Package,
   ChevronLeft,
   LogOut,
   User,
@@ -19,12 +20,17 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   {
-    name: 'Devices',
+    name: 'Dashboard',
     path: '/',
     icon: <Server className="w-5 h-5" />,
   },
   {
-    name: 'Apps',
+    name: 'My Apps',
+    path: '/my-apps',
+    icon: <Package className="w-5 h-5" />,
+  },
+  {
+    name: 'Marketplace',
     path: '/apps',
     icon: <Rocket className="w-5 h-5" />,
   },

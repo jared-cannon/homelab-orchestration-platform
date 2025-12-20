@@ -35,6 +35,23 @@ requirements:
   reliability: high
   always_on: true
 
+# Dependency Auto-Provisioning
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+      auto_provision: true
+      auto_configure: true
+      purpose: "Provides HTTPS and DNS-friendly URLs for accessing your cloud files"
+      message: "Traefik will provide secure HTTPS access to your NextCloud instance."
+
+# Traefik routing configuration
+traefik_routing:
+  default_hostname_template: "{app_name}.{device_domain}"
+  internal_port: 80  # NextCloud's internal web port
+  requires_https: true
+  middlewares: []
+
 # Database provisioning - DEMONSTRATES DATABASE POOLING
 database:
   engine: postgres  # Automatically provisions in shared Postgres instance

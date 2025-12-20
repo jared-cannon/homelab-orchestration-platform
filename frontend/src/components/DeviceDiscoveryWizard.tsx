@@ -90,7 +90,7 @@ export function DeviceDiscoveryWizard() {
         await createDevice.mutateAsync({
           name: device.hostname || `Device ${device.local_ip_address}`,
           type: device.type,
-          ip_address: device.local_ip_address,
+          local_ip_address: device.local_ip_address,
           mac_address: device.mac_address,
           credentials,
         })

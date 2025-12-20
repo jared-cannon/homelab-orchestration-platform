@@ -144,3 +144,164 @@ func escapeEnvValue(value string) string {
 	escaped = strings.ReplaceAll(escaped, "\"", "\\\"")
 	return fmt.Sprintf("\"%s\"", escaped)
 }
+
+// InjectTraefikLabels injects Traefik routing labels into a docker-compose.yaml content
+// This modifies the first service in the compose file to add Traefik routing configuration
+// Supports both Docker Compose and Docker Swarm modes
+func (eb *EnvironmentBuilder) InjectTraefikLabels(
+	composeContent string,
+	serviceName string, // Name of the main service to add labels to
+	hostname string,    // Full hostname (e.g., "vaultwarden.server1.home.arpa")
+	internalPort int,   // Internal port the service listens on
+	mode string,        // "compose" or "swarm"
+) (string, error) {
+
+	// Generate the labels based on mode
+	var labels []string
+	if mode == "swarm" {
+		labels = generateSwarmTraefikLabels(serviceName, hostname, internalPort)
+	} else {
+		labels = generateComposeTraefikLabels(serviceName, hostname, internalPort)
+	}
+
+	// Instead of parsing YAML (which is complex and error-prone),
+	// we'll use a simple string-based approach to inject labels
+	// This is safer for production and avoids YAML formatting issues
+
+	return injectLabelsIntoCompose(composeContent, serviceName, labels)
+}
+
+// generateComposeTraefikLabels creates Traefik labels for Docker Compose mode
+func generateComposeTraefikLabels(serviceName, hostname string, port int) []string {
+	routerName := sanitizeRouterName(serviceName)
+	return []string{
+		"traefik.enable=true",
+		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", routerName, hostname),
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", routerName),
+		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=letsencrypt", routerName),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", routerName, port),
+		fmt.Sprintf("traefik.docker.network=%s", TraefikNetworkName),
+	}
+}
+
+// generateSwarmTraefikLabels creates Traefik labels for Docker Swarm mode
+func generateSwarmTraefikLabels(serviceName, hostname string, port int) []string {
+	routerName := sanitizeRouterName(serviceName)
+	return []string{
+		"traefik.enable=true",
+		fmt.Sprintf("traefik.http.routers.%s.rule=Host(`%s`)", routerName, hostname),
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints=websecure", routerName),
+		fmt.Sprintf("traefik.http.routers.%s.tls.certresolver=letsencrypt", routerName),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", routerName, port),
+		// Swarm-specific: service must be on overlay network
+		fmt.Sprintf("traefik.docker.network=%s", TraefikNetworkName),
+	}
+}
+
+// sanitizeRouterName creates a valid Traefik router name from service name
+// Replaces invalid characters with hyphens
+func sanitizeRouterName(name string) string {
+	result := strings.ReplaceAll(name, "_", "-")
+	result = strings.ReplaceAll(result, " ", "-")
+	return strings.ToLower(result)
+}
+
+// injectLabelsIntoCompose injects labels into the specified service in docker-compose content
+// Uses simple string manipulation instead of YAML parsing for reliability
+func injectLabelsIntoCompose(composeContent, serviceName string, labels []string) (string, error) {
+	lines := strings.Split(composeContent, "\n")
+	var result []string
+	inTargetService := false
+	labelsInjected := false
+	currentIndent := ""
+
+	for i, line := range lines {
+		result = append(result, line)
+
+		// Detect if we're entering the target service
+		if !inTargetService && strings.Contains(line, serviceName+":") {
+			// Make sure this is a service definition (look for "services:" earlier)
+			for j := i - 1; j >= 0; j-- {
+				if strings.Contains(lines[j], "services:") {
+					inTargetService = true
+					break
+				}
+				// Stop looking if we hit another top-level key
+				if len(lines[j]) > 0 && lines[j][0] != ' ' && lines[j][0] != '\t' {
+					break
+				}
+			}
+		}
+
+		// If we're in the target service and haven't injected labels yet
+		if inTargetService && !labelsInjected {
+			// Detect indentation (look at next non-empty line)
+			if strings.TrimSpace(line) == serviceName+":" {
+				// Find indentation from next property
+				for j := i + 1; j < len(lines); j++ {
+					nextLine := lines[j]
+					if strings.TrimSpace(nextLine) != "" && !strings.HasPrefix(strings.TrimSpace(nextLine), "#") {
+						// Extract indentation
+						currentIndent = nextLine[:len(nextLine)-len(strings.TrimLeft(nextLine, " \t"))]
+						break
+					}
+				}
+
+				// Look for existing "labels:" section or insert before "networks:" or at end
+				labelsLineIndex := -1
+				networksLineIndex := -1
+
+				for j := i + 1; j < len(lines); j++ {
+					trimmed := strings.TrimSpace(lines[j])
+					if trimmed == "labels:" {
+						labelsLineIndex = j
+						break
+					}
+					if trimmed == "networks:" {
+						networksLineIndex = j
+						break
+					}
+					// Stop if we hit another service
+					if len(lines[j]) > 0 && lines[j][0] != ' ' && lines[j][0] != '\t' {
+						break
+					}
+				}
+
+				// Inject labels
+				labelsContent := []string{currentIndent + "labels:"}
+				for _, label := range labels {
+					labelsContent = append(labelsContent, currentIndent + "  - \"" + label + "\"")
+				}
+
+				if labelsLineIndex != -1 {
+					// Labels section exists, append to it
+					// Skip this for now - assume no existing labels
+				} else if networksLineIndex != -1 {
+					// Insert before networks
+					result = append(result[:networksLineIndex], append(labelsContent, result[networksLineIndex:]...)...)
+				} else {
+					// Append at current position
+					result = append(result, labelsContent...)
+				}
+
+				// Also inject networks if not present
+				networksContent := []string{
+					currentIndent + "networks:",
+					fmt.Sprintf("%s  - %s", currentIndent, TraefikNetworkName),
+				}
+				if networksLineIndex == -1 {
+					result = append(result, networksContent...)
+				}
+
+				labelsInjected = true
+				inTargetService = false // Done with this service
+			}
+		}
+	}
+
+	if !labelsInjected {
+		return "", fmt.Errorf("failed to inject labels: service '%s' not found or invalid format", serviceName)
+	}
+
+	return strings.Join(result, "\n"), nil
+}

@@ -30,9 +30,17 @@ func NewDeviceService(db *gorm.DB, credService *CredentialService, sshClient *ss
 
 // CreateDevice creates a new device and stores its credentials
 func (s *DeviceService) CreateDevice(device *models.Device, creds *DeviceCredentials) error {
-	// Validate local IP address (always required)
-	if !ValidateIPAddress(device.LocalIPAddress) {
-		return fmt.Errorf("invalid local IP address: %s", device.LocalIPAddress)
+	// Validate local IP address (allow hostnames for Tailscale devices)
+	if creds.Type == "tailscale" {
+		// Tailscale devices can use hostnames (e.g., "myserver.wolf-bear.ts.net") or IPs
+		if !ValidateHostname(device.LocalIPAddress) && !ValidateIPAddress(device.LocalIPAddress) {
+			return fmt.Errorf("invalid hostname or IP address: %s", device.LocalIPAddress)
+		}
+	} else {
+		// Non-Tailscale devices must use IP addresses
+		if !ValidateIPAddress(device.LocalIPAddress) {
+			return fmt.Errorf("invalid local IP address: %s", device.LocalIPAddress)
+		}
 	}
 
 	// Validate Tailscale address if provided (can be IP or hostname)

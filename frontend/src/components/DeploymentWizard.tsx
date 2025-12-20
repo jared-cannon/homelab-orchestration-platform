@@ -15,9 +15,10 @@ import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Checkbox } from './ui/checkbox'
-import { CheckCircle, XCircle, AlertCircle, Loader2, Check, Clock, HardDrive, Cpu } from 'lucide-react'
+import { CheckCircle, XCircle, AlertCircle, Loader2, Check, Clock, HardDrive, Cpu, Globe, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { LogViewer } from './LogViewer'
+import { DeploymentSuccessModal } from './DeploymentSuccessModal'
 
 interface DeploymentWizardProps {
   recipe: Recipe
@@ -31,7 +32,11 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
   const [currentStep, setCurrentStep] = useState<Step>('select-device')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('')
   const [config, setConfig] = useState<Record<string, any>>({})
+  const [customHostname, setCustomHostname] = useState<string>('')
+  const [useTraefik, setUseTraefik] = useState<boolean>(true)
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false)
   const [deploymentId, setDeploymentId] = useState<string>('')
+  const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false)
   const [dependencies, setDependencies] = useState<DependencyCheckResult | null>(null)
   const [dependenciesLoading, setDependenciesLoading] = useState(false)
   const [dependenciesError, setDependenciesError] = useState<string | null>(null)
@@ -43,6 +48,13 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
   const { data: deployment } = useDeployment(deploymentId)
 
   const selectedDevice = devices?.find((d) => d.id === selectedDeviceId)
+
+  // Show success modal when deployment completes
+  useEffect(() => {
+    if (deployment && deployment.status === 'running' && !showSuccessModal) {
+      setShowSuccessModal(true)
+    }
+  }, [deployment, showSuccessModal])
 
   // Auto-select best device when scores load
   useEffect(() => {
@@ -80,6 +92,18 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
       ...prev,
       [name]: value,
     }))
+  }
+
+  // Generate default hostname based on recipe slug and device
+  const getDefaultHostname = () => {
+    if (!selectedDevice) return ''
+    // Use device domain_suffix if available, otherwise use device name
+    const deviceSuffix = (selectedDevice as any).domain_suffix || `${selectedDevice.name.toLowerCase()}.home.arpa`
+    return `${recipe.slug}.${deviceSuffix}`
+  }
+
+  const getFinalHostname = () => {
+    return customHostname || getDefaultHostname()
   }
 
   const handleNext = async () => {
@@ -171,6 +195,8 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
         recipe_slug: recipe.slug,
         device_id: selectedDeviceId,
         config,
+        custom_hostname: customHostname || undefined,
+        use_traefik: useTraefik,
       })
 
       setDeploymentId(newDeployment.id)
@@ -186,7 +212,11 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
     setCurrentStep('select-device')
     setSelectedDeviceId('')
     setConfig({})
+    setCustomHostname('')
+    setUseTraefik(true)
+    setShowAdvanced(false)
     setDeploymentId('')
+    setShowSuccessModal(false)
     setDependencies(null)
     setDependenciesError(null)
     validateDeployment.reset()
@@ -311,75 +341,221 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
     </div>
   )
 
-  const renderConfigure = () => (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Configure the deployment options for {recipe.name}
-      </p>
+  const renderConfigure = () => {
+    // Separate required and advanced config options
+    const requiredOptions = recipe.config_options?.filter(opt => opt.required) || []
+    const advancedOptions = recipe.config_options?.filter(opt => !opt.required) || []
 
-      {recipe.config_options?.map((option) => (
-        <div key={option.name}>
-          <Label htmlFor={option.name}>
-            {option.label}
-            {option.required && <span className="text-red-500 ml-1">*</span>}
-          </Label>
+    return (
+      <div className="space-y-6">
+        <p className="text-sm text-muted-foreground">
+          Configure the deployment options for {recipe.name}
+        </p>
 
-          {option.type === 'string' && (
-            <Input
-              id={option.name}
-              type="text"
-              value={config[option.name] || ''}
-              onChange={(e) => handleConfigChange(option.name, e.target.value)}
-              placeholder={option.description}
-            />
-          )}
+        {/* Required Configuration */}
+        {requiredOptions.length > 0 && (
+          <div className="space-y-4">
+            {requiredOptions.map((option) => (
+              <div key={option.name}>
+                <Label htmlFor={option.name}>
+                  {option.label}
+                  <span className="text-red-500 ml-1">*</span>
+                </Label>
 
-          {option.type === 'number' && (
-            <Input
-              id={option.name}
-              type="number"
-              value={config[option.name] || ''}
-              onChange={(e) => handleConfigChange(option.name, Number(e.target.value))}
-              placeholder={option.description}
-            />
-          )}
+                {option.type === 'string' && (
+                  <Input
+                    id={option.name}
+                    type="text"
+                    value={config[option.name] || ''}
+                    onChange={(e) => handleConfigChange(option.name, e.target.value)}
+                    placeholder={option.description}
+                  />
+                )}
 
-          {(option.type === 'password' || option.type === 'secret') && (
-            <Input
-              id={option.name}
-              type="password"
-              value={config[option.name] || ''}
-              onChange={(e) => handleConfigChange(option.name, e.target.value)}
-              placeholder={option.description}
-              autoComplete="new-password"
-            />
-          )}
+                {option.type === 'number' && (
+                  <Input
+                    id={option.name}
+                    type="number"
+                    value={config[option.name] || ''}
+                    onChange={(e) => handleConfigChange(option.name, Number(e.target.value))}
+                    placeholder={option.description}
+                  />
+                )}
 
-          {option.type === 'boolean' && (
-            <div className="flex items-center space-x-2 mt-2">
-              <Checkbox
-                id={option.name}
-                checked={config[option.name] || false}
-                onCheckedChange={(checked: boolean) => handleConfigChange(option.name, checked)}
-              />
-              <label
-                htmlFor={option.name}
-                className="text-sm text-muted-foreground cursor-pointer"
-              >
-                {option.description}
-              </label>
+                {(option.type === 'password' || option.type === 'secret') && (
+                  <Input
+                    id={option.name}
+                    type="password"
+                    value={config[option.name] || ''}
+                    onChange={(e) => handleConfigChange(option.name, e.target.value)}
+                    placeholder={option.description}
+                    autoComplete="new-password"
+                  />
+                )}
+
+                {option.type === 'boolean' && (
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Checkbox
+                      id={option.name}
+                      checked={config[option.name] || false}
+                      onCheckedChange={(checked: boolean) => handleConfigChange(option.name, checked)}
+                    />
+                    <label
+                      htmlFor={option.name}
+                      className="text-sm text-muted-foreground cursor-pointer"
+                    >
+                      {option.description}
+                    </label>
+                  </div>
+                )}
+
+                {option.description && option.type !== 'boolean' && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {option.description}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Advanced Settings Section */}
+        <div className="border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center justify-between w-full text-left p-3 rounded-lg hover:bg-muted/50 transition-colors"
+          >
+            <span className="font-medium text-sm">Advanced Settings</span>
+            {showAdvanced ? (
+              <ChevronUp className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+
+          {showAdvanced && (
+            <div className="space-y-4 mt-4 p-4 bg-muted/20 rounded-lg border border-border">
+              {/* Hostname Configuration */}
+              <div>
+                <Label htmlFor="custom-hostname" className="flex items-center gap-2">
+                  <Globe className="w-4 h-4" />
+                  Custom Hostname
+                </Label>
+                <Input
+                  id="custom-hostname"
+                  type="text"
+                  value={customHostname}
+                  onChange={(e) => setCustomHostname(e.target.value)}
+                  placeholder={getDefaultHostname()}
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Default: <code className="px-1 py-0.5 bg-muted rounded">{getDefaultHostname()}</code>
+                  {getFinalHostname() && (
+                    <>
+                      {' · '}Access URL: <code className="px-1 py-0.5 bg-muted rounded">
+                        {useTraefik ? 'https://' : 'http://'}{getFinalHostname()}
+                      </code>
+                    </>
+                  )}
+                </p>
+              </div>
+
+              {/* Traefik Toggle */}
+              <div className="flex items-start space-x-3 p-3 bg-card rounded-lg border border-border">
+                <Checkbox
+                  id="use-traefik"
+                  checked={useTraefik}
+                  onCheckedChange={(checked: boolean) => setUseTraefik(checked)}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="use-traefik"
+                    className="text-sm font-medium cursor-pointer block"
+                  >
+                    Use Traefik Reverse Proxy
+                  </label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Provides automatic HTTPS with Let's Encrypt and DNS-friendly URLs.
+                    {!useTraefik && ' Without Traefik, you\'ll need to access via IP:port.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Advanced Recipe Options */}
+              {advancedOptions.length > 0 && (
+                <div className="space-y-4 pt-4 border-t border-border">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Optional Configuration
+                  </p>
+                  {advancedOptions.map((option) => (
+                    <div key={option.name}>
+                      <Label htmlFor={option.name}>{option.label}</Label>
+
+                      {option.type === 'string' && (
+                        <Input
+                          id={option.name}
+                          type="text"
+                          value={config[option.name] || ''}
+                          onChange={(e) => handleConfigChange(option.name, e.target.value)}
+                          placeholder={option.description}
+                        />
+                      )}
+
+                      {option.type === 'number' && (
+                        <Input
+                          id={option.name}
+                          type="number"
+                          value={config[option.name] || ''}
+                          onChange={(e) => handleConfigChange(option.name, Number(e.target.value))}
+                          placeholder={option.description}
+                        />
+                      )}
+
+                      {(option.type === 'password' || option.type === 'secret') && (
+                        <Input
+                          id={option.name}
+                          type="password"
+                          value={config[option.name] || ''}
+                          onChange={(e) => handleConfigChange(option.name, e.target.value)}
+                          placeholder={option.description}
+                          autoComplete="new-password"
+                        />
+                      )}
+
+                      {option.type === 'boolean' && (
+                        <div className="flex items-center space-x-2 mt-2">
+                          <Checkbox
+                            id={option.name}
+                            checked={config[option.name] || false}
+                            onCheckedChange={(checked: boolean) => handleConfigChange(option.name, checked)}
+                          />
+                          <label
+                            htmlFor={option.name}
+                            className="text-sm text-muted-foreground cursor-pointer"
+                          >
+                            {option.description}
+                          </label>
+                        </div>
+                      )}
+
+                      {option.description && option.type !== 'boolean' && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {option.description}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
-
-          {option.description && option.type !== 'boolean' && (
-            <p className="text-xs text-muted-foreground mt-1">
-              {option.description}
-            </p>
-          )}
         </div>
-      ))}
-    </div>
-  )
+      </div>
+    )
+  }
 
   const renderValidate = () => {
     const validationResult = validateDeployment.data
@@ -796,58 +972,78 @@ export function DeploymentWizard({ recipe, open, onOpenChange }: DeploymentWizar
   )
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
-          <DialogTitle>Deploy {recipe.name}</DialogTitle>
-          <DialogDescription>{recipe.tagline}</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>Deploy {recipe.name}</DialogTitle>
+            <DialogDescription>{recipe.tagline}</DialogDescription>
+          </DialogHeader>
 
-        {renderStepIndicator()}
+          {renderStepIndicator()}
 
-        <div className="py-4">
-          {currentStep === 'select-device' && renderSelectDevice()}
-          {currentStep === 'dependencies' && renderDependencies()}
-          {currentStep === 'configure' && renderConfigure()}
-          {currentStep === 'validate' && renderValidate()}
-          {currentStep === 'deploy' && renderDeploy()}
-        </div>
-
-        <DialogFooter>
-          <div className="flex justify-between w-full">
-            <Button variant="outline" onClick={handleBack} disabled={currentStep === 'select-device'}>
-              Back
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
-              {currentStep !== 'deploy' && (
-                <Button
-                  onClick={handleNext}
-                  disabled={
-                    (currentStep === 'select-device' && (!selectedDeviceId || dependenciesLoading)) ||
-                    (currentStep === 'dependencies' && (dependenciesLoading || !!dependenciesError)) ||
-                    (currentStep === 'validate' && validateDeployment.isPending) ||
-                    (currentStep === 'validate' && !validateDeployment.data?.valid)
-                  }
-                >
-                  {dependenciesLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Checking...
-                    </>
-                  ) : currentStep === 'validate' ? (
-                    'Continue'
-                  ) : (
-                    'Next'
-                  )}
-                </Button>
-              )}
-            </div>
+          <div className="py-4">
+            {currentStep === 'select-device' && renderSelectDevice()}
+            {currentStep === 'dependencies' && renderDependencies()}
+            {currentStep === 'configure' && renderConfigure()}
+            {currentStep === 'validate' && renderValidate()}
+            {currentStep === 'deploy' && renderDeploy()}
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+          <DialogFooter>
+            <div className="flex justify-between w-full">
+              <Button variant="outline" onClick={handleBack} disabled={currentStep === 'select-device'}>
+                Back
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={handleClose}>
+                  Cancel
+                </Button>
+                {currentStep !== 'deploy' && (
+                  <Button
+                    onClick={handleNext}
+                    disabled={
+                      (currentStep === 'select-device' && (!selectedDeviceId || dependenciesLoading)) ||
+                      (currentStep === 'dependencies' && (dependenciesLoading || !!dependenciesError)) ||
+                      (currentStep === 'validate' && validateDeployment.isPending) ||
+                      (currentStep === 'validate' && !validateDeployment.data?.valid)
+                    }
+                  >
+                    {dependenciesLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Checking...
+                      </>
+                    ) : currentStep === 'validate' ? (
+                      'Continue'
+                    ) : (
+                      'Next'
+                    )}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Success Modal */}
+      {deployment && deployment.status === 'running' && (
+        <DeploymentSuccessModal
+          open={showSuccessModal}
+          onOpenChange={setShowSuccessModal}
+          deployment={{
+            id: deployment.id,
+            recipe_name: deployment.recipe_name,
+            recipe_slug: deployment.recipe_slug,
+            url: (deployment as any).url,
+            hostname: (deployment as any).hostname,
+            use_traefik: (deployment as any).use_traefik,
+          }}
+          recipeIcon={recipe.icon_url}
+          postDeployInstructions={recipe.post_deploy_instructions}
+        />
+      )}
+    </>
   )
 }

@@ -54,6 +54,7 @@ type Device struct {
 	TailscaleAddress  string            `json:"tailscale_address,omitempty"`                           // Tailscale IP or hostname (optional)
 	PrimaryConnection PrimaryConnection `gorm:"default:local" json:"primary_connection"`               // Which connection to try first
 	MACAddress        string            `json:"mac_address,omitempty"`
+	DomainSuffix      string            `json:"domain_suffix,omitempty"`                               // Domain suffix for apps (e.g., "server1.home.arpa")
 	Status            DeviceStatus      `gorm:"default:unknown" json:"status"`
 	Username          string            `gorm:"default:''" json:"username"`              // SSH username (not sensitive)
 	AuthType          AuthType          `gorm:"default:auto" json:"auth_type"`           // Authentication method
@@ -114,4 +115,60 @@ func (d *Device) GetFallbackAddress() string {
 // GetSSHHost returns the primary SSH connection host (address:22)
 func (d *Device) GetSSHHost() string {
 	return d.GetPrimaryAddress() + ":22"
+}
+
+// GetAppURL generates a full app URL for a given hostname
+// hostname: app-specific hostname (e.g., "vaultwarden" or "vaultwarden.server1.home.arpa")
+// useHTTPS: whether to use HTTPS (true when using Traefik with Let's Encrypt)
+func (d *Device) GetAppURL(hostname string, useHTTPS bool) string {
+	scheme := "http"
+	if useHTTPS {
+		scheme = "https"
+	}
+
+	// If hostname already includes the domain suffix, use it as-is
+	// Otherwise, append the device's domain suffix
+	if d.DomainSuffix != "" && !containsDomain(hostname, d.DomainSuffix) {
+		hostname = hostname + "." + d.DomainSuffix
+	}
+
+	return scheme + "://" + hostname
+}
+
+// GetDefaultDomainSuffix returns a default domain suffix based on device name
+// Used when DomainSuffix is not explicitly set
+func (d *Device) GetDefaultDomainSuffix() string {
+	if d.DomainSuffix != "" {
+		return d.DomainSuffix
+	}
+
+	// Sanitize device name to be DNS-safe (lowercase, replace spaces with hyphens)
+	safeName := sanitizeDNSName(d.Name)
+	return safeName + ".home.arpa"
+}
+
+// Helper function to check if hostname already contains the domain
+func containsDomain(hostname, domain string) bool {
+	// Simple check: if hostname ends with domain or contains it
+	return len(hostname) > len(domain) && hostname[len(hostname)-len(domain):] == domain
+}
+
+// sanitizeDNSName converts a string to a DNS-safe hostname
+// Converts to lowercase, replaces spaces and underscores with hyphens
+func sanitizeDNSName(name string) string {
+	result := ""
+	for _, char := range name {
+		switch {
+		case (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9'):
+			result += string(char)
+		case char >= 'A' && char <= 'Z':
+			result += string(char + 32) // Convert to lowercase
+		case char == ' ' || char == '_':
+			result += "-"
+		case char == '-':
+			result += "-"
+		// Skip other characters
+		}
+	}
+	return result
 }

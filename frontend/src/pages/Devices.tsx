@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { BookOpen } from 'lucide-react'
-import { useDevices, useAggregateResources } from '../api/hooks'
+import { BookOpen, Rocket } from 'lucide-react'
+import { useDevices, useAggregateResources, useDeployments } from '../api/hooks'
 import { AddDeviceDialog } from '../components/AddDeviceDialog'
 import { DeviceDiscoveryWizard } from '../components/DeviceDiscoveryWizard'
 import { FirstRunWizard } from '../components/FirstRunWizard'
 import { DeviceHealthCard } from '../components/DeviceHealthCard'
 import { AggregateResourceCard } from '../components/AggregateResourceCard'
+import { DeployedAppCard } from '../components/DeployedAppCard'
 import { ServerSetupGuide } from '../components/ServerSetupGuide'
 import { Button } from '../components/ui/button'
 
 export function DevicesPage() {
+  const navigate = useNavigate()
   const { data: devices, isLoading, error } = useDevices()
   const { data: aggregateResources } = useAggregateResources()
+  const { data: deployments } = useDeployments()
   const [showSetupGuide, setShowSetupGuide] = useState(false)
+
+  // Filter for running deployments to show in Quick Access
+  const runningDeployments = deployments?.filter(d => d.status === 'running') || []
 
   // Show toast notification when device loading fails
   useEffect(() => {
@@ -126,11 +133,61 @@ export function DevicesPage() {
           </div>
         </div>
 
+        {/* Quick Access - Recently Deployed Apps */}
+        {runningDeployments.length > 0 && (
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Rocket className="w-6 h-6 text-primary" />
+                  Quick Access
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Your running applications ({runningDeployments.length})
+                </p>
+              </div>
+              {runningDeployments.length > 3 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate('/my-apps')}
+                >
+                  View All Apps →
+                </Button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-4">
+              {runningDeployments.slice(0, 3).map((deployment) => (
+                <DeployedAppCard
+                  key={deployment.id}
+                  deployment={deployment}
+                  onOpenApp={(url) => window.open(url, '_blank')}
+                  onManage={(dep) => navigate(`/deployments/${dep.id}`)}
+                  onDelete={(_dep) => {
+                    toast.warning('Delete functionality coming soon')
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Device Grid */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {devices.map((device) => (
-            <DeviceHealthCard key={device.id} device={device} />
-          ))}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-2xl font-bold">Devices</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {devices.length} device{devices.length !== 1 ? 's' : ''} in your homelab
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {devices.map((device) => (
+              <DeviceHealthCard key={device.id} device={device} />
+            ))}
+          </div>
         </div>
       </div>
 

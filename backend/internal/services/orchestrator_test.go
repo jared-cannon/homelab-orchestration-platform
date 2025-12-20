@@ -859,3 +859,262 @@ func TestNilSSHClientHandling(t *testing.T) {
 		t.Errorf("WaitForHealthy() error should mention nil SSH client, got: %v", err)
 	}
 }
+
+// ============================================================================
+// Docker Swarm Orchestrator Tests
+// ============================================================================
+
+// TestNewDockerSwarmOrchestrator tests creating a new Swarm orchestrator
+func TestNewDockerSwarmOrchestrator(t *testing.T) {
+	t.Run("creates orchestrator with valid SSH client", func(t *testing.T) {
+		orchestrator := NewDockerSwarmOrchestrator(nil) // nil is acceptable for testing
+		if orchestrator == nil {
+			t.Error("NewDockerSwarmOrchestrator() should not return nil")
+		}
+		if orchestrator.GetMode() != "swarm" {
+			t.Errorf("GetMode() = %v, want 'swarm'", orchestrator.GetMode())
+		}
+	})
+}
+
+// TestDockerSwarmOrchestratorGetMode tests the GetMode method
+func TestDockerSwarmOrchestratorGetMode(t *testing.T) {
+	orchestrator := NewDockerSwarmOrchestrator(nil)
+	mode := orchestrator.GetMode()
+	if mode != "swarm" {
+		t.Errorf("GetMode() = %v, want 'swarm'", mode)
+	}
+}
+
+// TestNewOrchestratorSwarmMode tests creating an orchestrator with swarm config
+func TestNewOrchestratorSwarmMode(t *testing.T) {
+	config := OrchestratorConfig{
+		Mode:         "swarm",
+		SwarmEnabled: true,
+	}
+	orchestrator := NewOrchestrator(config, nil)
+	if orchestrator == nil {
+		t.Error("NewOrchestrator() should not return nil")
+	}
+	if orchestrator.GetMode() != "swarm" {
+		t.Errorf("GetMode() = %v, want 'swarm'", orchestrator.GetMode())
+	}
+}
+
+// TestDockerSwarmOrchestratorNilSSHClient tests Swarm orchestrator with nil SSH client
+func TestDockerSwarmOrchestratorNilSSHClient(t *testing.T) {
+	ctx := context.Background()
+	orchestrator := NewDockerSwarmOrchestrator(nil)
+
+	spec := DeploymentSpec{
+		Host:           "192.168.1.10:22",
+		StackName:      "test-stack",
+		DeployDir:      "/home/user/deployments/test",
+		ComposeContent: "version: '3.8'\nservices:\n  app:\n    image: nginx",
+		Timeout:        10 * time.Minute,
+	}
+
+	// Deploy should fail with clear error
+	err := orchestrator.Deploy(ctx, spec)
+	if err == nil {
+		t.Error("Deploy() with nil SSH client should return error")
+	}
+	if !strings.Contains(err.Error(), "SSH client is nil") {
+		t.Errorf("Deploy() error should mention nil SSH client, got: %v", err)
+	}
+
+	// HealthCheck should fail with clear error
+	_, err = orchestrator.HealthCheck(ctx, "test-stack", "192.168.1.10:22")
+	if err == nil {
+		t.Error("HealthCheck() with nil SSH client should return error")
+	}
+	if !strings.Contains(err.Error(), "SSH client is nil") {
+		t.Errorf("HealthCheck() error should mention nil SSH client, got: %v", err)
+	}
+
+	// Remove should fail with clear error
+	err = orchestrator.Remove(ctx, "test-stack", "192.168.1.10:22", false)
+	if err == nil {
+		t.Error("Remove() with nil SSH client should return error")
+	}
+	if !strings.Contains(err.Error(), "SSH client is nil") {
+		t.Errorf("Remove() error should mention nil SSH client, got: %v", err)
+	}
+
+	// WaitForHealthy should fail with clear error
+	err = orchestrator.WaitForHealthy(ctx, "test-stack", "192.168.1.10:22", 1*time.Minute)
+	if err == nil {
+		t.Error("WaitForHealthy() with nil SSH client should return error")
+	}
+	if !strings.Contains(err.Error(), "SSH client is nil") {
+		t.Errorf("WaitForHealthy() error should mention nil SSH client, got: %v", err)
+	}
+
+	// RemoveWithCleanup should fail with clear error
+	removalSpec := RemovalSpec{
+		Host:      "192.168.1.10:22",
+		StackName: "test-stack",
+		DeployDir: "/home/user/deployments/test",
+	}
+	err = orchestrator.RemoveWithCleanup(ctx, removalSpec)
+	if err == nil {
+		t.Error("RemoveWithCleanup() with nil SSH client should return error")
+	}
+	if !strings.Contains(err.Error(), "SSH client is nil") {
+		t.Errorf("RemoveWithCleanup() error should mention nil SSH client, got: %v", err)
+	}
+}
+
+// TestDockerSwarmOrchestratorSecurityValidation tests security validation for Swarm
+func TestDockerSwarmOrchestratorSecurityValidation(t *testing.T) {
+	ctx := context.Background()
+	orchestrator := NewDockerSwarmOrchestrator(nil)
+
+	tests := []struct {
+		name      string
+		stackName string
+		wantErr   bool
+		errMsg    string
+	}{
+		{
+			name:      "valid stack name",
+			stackName: "valid-stack-name_123",
+			wantErr:   false,
+		},
+		{
+			name:      "injection attempt with semicolon",
+			stackName: "stack; rm -rf /",
+			wantErr:   true,
+			errMsg:    "invalid stack name",
+		},
+		{
+			name:      "injection attempt with pipe",
+			stackName: "stack | cat /etc/passwd",
+			wantErr:   true,
+			errMsg:    "invalid stack name",
+		},
+		{
+			name:      "injection attempt with backtick",
+			stackName: "stack`whoami`",
+			wantErr:   true,
+			errMsg:    "invalid stack name",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test HealthCheck validation
+			_, err := orchestrator.HealthCheck(ctx, tt.stackName, "192.168.1.10:22")
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("HealthCheck() expected error containing %q, got: %v", tt.errMsg, err)
+				}
+			}
+
+			// Test Remove validation
+			err = orchestrator.Remove(ctx, tt.stackName, "192.168.1.10:22", false)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Remove() expected error containing %q, got: %v", tt.errMsg, err)
+				}
+			}
+
+			// Test WaitForHealthy validation
+			err = orchestrator.WaitForHealthy(ctx, tt.stackName, "192.168.1.10:22", 1*time.Second)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("WaitForHealthy() expected error containing %q, got: %v", tt.errMsg, err)
+				}
+			}
+		})
+	}
+}
+
+// TestDockerSwarmOrchestratorContextCancellation tests context cancellation for Swarm
+func TestDockerSwarmOrchestratorContextCancellation(t *testing.T) {
+	orchestrator := NewDockerSwarmOrchestrator(nil)
+
+	// Create a cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	spec := DeploymentSpec{
+		Host:           "192.168.1.10:22",
+		StackName:      "test-stack",
+		DeployDir:      "/home/user/deployments/test",
+		ComposeContent: "version: '3.8'",
+		Timeout:        10 * time.Minute,
+	}
+
+	// Deploy should fail fast with context cancellation
+	err := orchestrator.Deploy(ctx, spec)
+	if err == nil {
+		t.Error("Deploy() with cancelled context should return error")
+	}
+	if !strings.Contains(err.Error(), "cancelled") && !strings.Contains(err.Error(), "canceled") {
+		t.Errorf("Deploy() with cancelled context should mention cancellation, got: %v", err)
+	}
+}
+
+// TestOrchestratorModeDetection tests mode detection is implemented
+func TestOrchestratorModeDetection(t *testing.T) {
+	t.Run("DetectOrchestratorMode exists and returns valid mode", func(t *testing.T) {
+		// Test with nil SSH client - should return compose and error
+		mode, err := DetectOrchestratorMode(nil, "192.168.1.10:22")
+		if err == nil {
+			t.Error("DetectOrchestratorMode() with nil SSH client should return error")
+		}
+		if mode != "compose" {
+			t.Errorf("DetectOrchestratorMode() with nil SSH client should default to 'compose', got: %v", mode)
+		}
+	})
+}
+
+// TestOrchestratorConfigSwitch tests switching between orchestrator modes
+func TestOrchestratorConfigSwitch(t *testing.T) {
+	tests := []struct {
+		name         string
+		config       OrchestratorConfig
+		expectedMode string
+	}{
+		{
+			name: "compose mode",
+			config: OrchestratorConfig{
+				Mode:         "compose",
+				SwarmEnabled: false,
+			},
+			expectedMode: "compose",
+		},
+		{
+			name: "swarm mode",
+			config: OrchestratorConfig{
+				Mode:         "swarm",
+				SwarmEnabled: true,
+			},
+			expectedMode: "swarm",
+		},
+		{
+			name: "default mode (empty config)",
+			config: OrchestratorConfig{
+				Mode: "",
+			},
+			expectedMode: "compose",
+		},
+		{
+			name: "unknown mode defaults to compose",
+			config: OrchestratorConfig{
+				Mode: "kubernetes",
+			},
+			expectedMode: "compose",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orchestrator := NewOrchestrator(tt.config, nil)
+			if orchestrator.GetMode() != tt.expectedMode {
+				t.Errorf("GetMode() = %v, want %v", orchestrator.GetMode(), tt.expectedMode)
+			}
+		})
+	}
+}

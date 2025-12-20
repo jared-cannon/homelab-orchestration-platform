@@ -33,6 +33,23 @@ requirements:
   reliability: "high"
   always_on: true
 
+# Dependency Auto-Provisioning
+dependencies:
+  required:
+    - type: reverse_proxy
+      prefer: traefik
+      auto_provision: true
+      auto_configure: true
+      purpose: "Provides HTTPS and DNS-friendly URLs for secure password manager access"
+      message: "Vaultwarden requires HTTPS for security. Traefik will be automatically deployed with Let's Encrypt certificates."
+
+# Traefik routing configuration
+traefik_routing:
+  default_hostname_template: "{app_name}.{device_domain}"
+  internal_port: 80  # Vaultwarden's internal web port
+  requires_https: true
+  middlewares: []
+
 # Database configuration (optional PostgreSQL support)
 database:
   engine: "none"

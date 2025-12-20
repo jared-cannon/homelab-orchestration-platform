@@ -77,7 +77,7 @@ func TestDeviceService_CreateDevice(t *testing.T) {
 
 		err := deviceService.CreateDevice(device, creds)
 		assert.Error(t, err, "Should reject invalid IP")
-		assert.Contains(t, err.Error(), "invalid IP address", "Error should mention invalid IP")
+		assert.Contains(t, err.Error(), "invalid local IP address", "Error should mention invalid IP")
 	})
 
 	t.Run("Rejects duplicate IP address", func(t *testing.T) {
@@ -394,7 +394,7 @@ func TestDeviceService_CreateDevice_TailscaleHostnames(t *testing.T) {
 
 		err := deviceService.CreateDevice(device, creds)
 		assert.Error(t, err, "Should reject hostname for non-Tailscale auth")
-		assert.Contains(t, err.Error(), "invalid IP address", "Error should mention invalid IP")
+		assert.Contains(t, err.Error(), "invalid local IP address", "Error should mention invalid IP")
 	})
 
 	t.Run("Retrieves Tailscale credentials correctly", func(t *testing.T) {

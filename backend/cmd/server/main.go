@@ -50,6 +50,14 @@ func initDB() (*gorm.DB, error) {
 		// Continue startup but with clear warning that schema may be incorrect
 	}
 
+	// Run DNS/URL fields migration for Traefik integration
+	if err := models.MigrateDNSAndURLFields(db); err != nil {
+		log.Printf("❌ CRITICAL: DNS/URL fields migration failed: %v", err)
+		log.Printf("❌ Traefik integration and app access URLs may not work correctly")
+		log.Printf("❌ Please check the error above and ensure database migrations can run")
+		// Continue startup but with warning
+	}
+
 	// Run auto-migrations
 	err = db.AutoMigrate(
 		&models.User{},

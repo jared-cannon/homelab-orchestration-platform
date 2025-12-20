@@ -285,13 +285,39 @@ func checkContextCancelled(ctx context.Context) error {
 	}
 }
 
+// DetectOrchestratorMode detects whether Docker Swarm is active on a device
+// Returns "swarm" if Swarm mode is active, "compose" otherwise
+func DetectOrchestratorMode(sshClient *ssh.Client, host string) (string, error) {
+	if sshClient == nil {
+		return "compose", fmt.Errorf("SSH client is nil")
+	}
+
+	// Check if docker swarm is active by running `docker info`
+	// If swarm is active, the output will contain "Swarm: active"
+	checkCmd := "docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo 'inactive'"
+	output, err := sshClient.ExecuteWithTimeout(host, checkCmd, 10*time.Second)
+
+	if err != nil {
+		// If command fails, assume compose mode
+		log.Printf("[Orchestrator] Failed to detect swarm mode on %s, defaulting to compose: %v", host, err)
+		return "compose", nil
+	}
+
+	// Check if swarm is active
+	if strings.TrimSpace(output) == "active" {
+		log.Printf("[Orchestrator] Detected Docker Swarm mode on %s", host)
+		return "swarm", nil
+	}
+
+	log.Printf("[Orchestrator] Detected Docker Compose mode on %s", host)
+	return "compose", nil
+}
+
 // NewOrchestrator creates an orchestrator based on the configuration
 func NewOrchestrator(config OrchestratorConfig, sshClient *ssh.Client) ContainerOrchestrator {
 	switch config.Mode {
 	case "swarm":
-		// Swarm orchestrator will be implemented in the future
-		log.Printf("[Orchestrator] Swarm mode requested but not yet implemented, falling back to Docker Compose")
-		return NewDockerComposeOrchestrator(sshClient)
+		return NewDockerSwarmOrchestrator(sshClient)
 	case "compose":
 		fallthrough
 	default:
@@ -631,6 +657,324 @@ func (dco *DockerComposeOrchestrator) WaitForHealthy(ctx context.Context, stackN
 		}
 
 		log.Printf("[DockerCompose] Waiting for %s to become healthy (attempt %d/%d): %s", stackName, attempt, maxAttempts, status.Message)
+
+		// Context-aware sleep: either timeout or ticker fires
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("deployment did not become healthy: %w", timeoutCtx.Err())
+		case <-ticker.C:
+			// Continue to next iteration
+		}
+	}
+}
+
+// ============================================================================
+// Docker Swarm Orchestrator
+// ============================================================================
+
+// DockerSwarmOrchestrator implements ContainerOrchestrator for Docker Swarm
+type DockerSwarmOrchestrator struct {
+	sshClient *ssh.Client
+}
+
+// NewDockerSwarmOrchestrator creates a new Docker Swarm orchestrator
+// Note: sshClient can be nil for testing, but actual deployment operations will fail
+// Production code should always provide a valid SSH client
+func NewDockerSwarmOrchestrator(sshClient *ssh.Client) *DockerSwarmOrchestrator {
+	if sshClient == nil {
+		log.Printf("[Orchestrator] Warning: SSH client is nil - deployment operations will fail")
+	}
+	return &DockerSwarmOrchestrator{
+		sshClient: sshClient,
+	}
+}
+
+// GetMode returns the orchestration mode
+func (dso *DockerSwarmOrchestrator) GetMode() string {
+	return "swarm"
+}
+
+// Deploy deploys a service using Docker Swarm stack
+func (dso *DockerSwarmOrchestrator) Deploy(ctx context.Context, spec DeploymentSpec) error {
+	// Validate SSH client is available
+	if dso.sshClient == nil {
+		return fmt.Errorf("SSH client is nil - cannot perform deployment operations")
+	}
+
+	// Validate spec (includes security checks for injection prevention)
+	if err := spec.Validate(); err != nil {
+		return err
+	}
+
+	// Set default timeout if not specified
+	if spec.Timeout == 0 {
+		spec.Timeout = 10 * time.Minute
+	}
+
+	// Check context before starting (fail fast if already cancelled)
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("deployment cancelled before start: %w", err)
+	}
+
+	// Create deployment directory
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", spec.DeployDir)
+	if _, err := dso.sshClient.ExecuteWithTimeout(spec.Host, mkdirCmd, 30*time.Second); err != nil {
+		return fmt.Errorf("failed to create deployment directory: %w", err)
+	}
+
+	// Check context after directory creation
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("deployment cancelled during setup: %w", err)
+	}
+
+	// Write compose file (same format for swarm stacks)
+	composeFile := fmt.Sprintf("%s/docker-compose.yml", spec.DeployDir)
+
+	// Validate constructed path (defense-in-depth: ensure path is still safe after concatenation)
+	if !isValidDeployPath(composeFile) {
+		return fmt.Errorf("invalid compose file path after construction: %s", composeFile)
+	}
+
+	// SECURITY: heredoc MUST use single quotes ('EOF') to prevent shell expansion
+	writeCmd := fmt.Sprintf("cat > %s << 'EOF'\n%s\nEOF", composeFile, spec.ComposeContent)
+	if _, err := dso.sshClient.ExecuteWithTimeout(spec.Host, writeCmd, 1*time.Minute); err != nil {
+		return fmt.Errorf("failed to write compose file: %w", err)
+	}
+
+	// Write environment file if provided
+	// NOTE: Docker Swarm doesn't support .env files directly
+	// Environment variables must be exported before running docker stack deploy
+	// or defined in the compose file itself
+	envVarsExport := ""
+	if len(spec.Environment) > 0 {
+		// Sort keys for deterministic output
+		keys := make([]string, 0, len(spec.Environment))
+		for k := range spec.Environment {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Build export commands for each environment variable
+		for _, key := range keys {
+			// Escape value properly for shell
+			escapedValue := spec.Environment[key]
+			// Use printf to safely set the environment variable (prevents injection)
+			envVarsExport += fmt.Sprintf("export %s=%q\n", key, escapedValue)
+		}
+	}
+
+	// Check context before deployment
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("deployment cancelled before docker stack deploy: %w", err)
+	}
+
+	// Deploy with docker stack deploy
+	// Environment variables must be exported in the same shell session
+	deployCmd := fmt.Sprintf("cd %s && %s docker stack deploy -c docker-compose.yml %s", spec.DeployDir, envVarsExport, spec.StackName)
+	output, err := dso.sshClient.ExecuteWithTimeout(spec.Host, deployCmd, spec.Timeout)
+	if err != nil {
+		return fmt.Errorf("docker stack deploy failed: %w (output: %s)", err, output)
+	}
+
+	log.Printf("[DockerSwarm] Successfully deployed stack %s", spec.StackName)
+	return nil
+}
+
+// HealthCheck checks if a Docker Swarm stack is healthy
+func (dso *DockerSwarmOrchestrator) HealthCheck(ctx context.Context, stackName string, host string) (HealthStatus, error) {
+	status := HealthStatus{
+		Timestamp: time.Now(),
+		Healthy:   false,
+		Running:   false,
+	}
+
+	// Validate SSH client is available
+	if dso.sshClient == nil {
+		status.Message = "SSH client is nil"
+		return status, fmt.Errorf("SSH client is nil - cannot perform health check operations")
+	}
+
+	// Validate stack name (prevent shell injection)
+	if !isValidStackName(stackName) {
+		status.Message = "Invalid stack name"
+		return status, fmt.Errorf("invalid stack name: only alphanumeric, hyphens, and underscores allowed")
+	}
+
+	// Check context before starting (fail fast if already cancelled)
+	if err := checkContextCancelled(ctx); err != nil {
+		status.Message = "Health check cancelled"
+		return status, err
+	}
+
+	// Check if services exist for this stack
+	checkCmd := fmt.Sprintf("docker service ls --filter label=com.docker.stack.namespace=%s --format '{{.Name}}' 2>/dev/null", stackName)
+	output, err := dso.sshClient.ExecuteWithTimeout(host, checkCmd, 10*time.Second)
+
+	if err != nil {
+		status.Message = fmt.Sprintf("Failed to check service status: %v", err)
+		return status, err
+	}
+
+	// If output is empty, no services found
+	if strings.TrimSpace(output) == "" {
+		status.Message = "No services found"
+		return status, nil
+	}
+
+	// Get replica status for all services in the stack
+	replicaCmd := fmt.Sprintf("docker stack ps %s --format '{{.CurrentState}}' 2>/dev/null", stackName)
+	replicaOutput, err := dso.sshClient.ExecuteWithTimeout(host, replicaCmd, 10*time.Second)
+
+	if err != nil {
+		status.Message = fmt.Sprintf("Failed to check replica status: %v", err)
+		return status, err
+	}
+
+	// Check if any replicas are running
+	if strings.Contains(replicaOutput, "Running") {
+		status.Running = true
+
+		// Consider healthy if all replicas are running (no "Failed" or "Rejected" states)
+		if !strings.Contains(replicaOutput, "Failed") && !strings.Contains(replicaOutput, "Rejected") {
+			status.Healthy = true
+			status.Message = "Services are running and healthy"
+		} else {
+			status.Message = "Some services are not healthy"
+		}
+	} else {
+		status.Message = "Services are not running"
+	}
+
+	return status, nil
+}
+
+// Remove removes a Docker Swarm stack
+func (dso *DockerSwarmOrchestrator) Remove(ctx context.Context, stackName string, host string, includeVolumes bool) error {
+	// Validate SSH client is available
+	if dso.sshClient == nil {
+		return fmt.Errorf("SSH client is nil - cannot perform removal operations")
+	}
+
+	// Validate stack name (prevent shell injection)
+	if !isValidStackName(stackName) {
+		return fmt.Errorf("invalid stack name: only alphanumeric, hyphens, and underscores allowed")
+	}
+
+	// Check context before starting (fail fast if already cancelled)
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("removal cancelled: %w", err)
+	}
+
+	// Remove the stack
+	removeCmd := fmt.Sprintf("docker stack rm %s 2>/dev/null || true", stackName)
+	if _, err := dso.sshClient.ExecuteWithTimeout(host, removeCmd, 2*time.Minute); err != nil {
+		log.Printf("[DockerSwarm] Warning: docker stack rm failed for %s: %v", stackName, err)
+	}
+
+	// Note: Docker Swarm doesn't automatically remove volumes
+	// If includeVolumes is true, we need to manually remove stack volumes
+	if includeVolumes {
+		// Wait a moment for services to fully stop
+		time.Sleep(5 * time.Second)
+
+		// List volumes associated with the stack and remove them
+		volumeCmd := fmt.Sprintf("docker volume ls --filter label=com.docker.stack.namespace=%s -q | xargs -r docker volume rm 2>/dev/null || true", stackName)
+		if _, err := dso.sshClient.ExecuteWithTimeout(host, volumeCmd, 1*time.Minute); err != nil {
+			log.Printf("[DockerSwarm] Warning: failed to remove volumes for %s: %v", stackName, err)
+		}
+	}
+
+	log.Printf("[DockerSwarm] Removed stack %s (volumes: %v)", stackName, includeVolumes)
+	return nil
+}
+
+// RemoveWithCleanup removes a deployment and cleans up associated resources
+func (dso *DockerSwarmOrchestrator) RemoveWithCleanup(ctx context.Context, spec RemovalSpec) error {
+	// Validate SSH client is available
+	if dso.sshClient == nil {
+		return fmt.Errorf("SSH client is nil - cannot perform cleanup operations")
+	}
+
+	// Validate spec (includes security checks for injection prevention)
+	if err := spec.Validate(); err != nil {
+		return err
+	}
+
+	// Check context before starting (fail fast if already cancelled)
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("cleanup cancelled before start: %w", err)
+	}
+
+	// Remove the stack (graceful shutdown)
+	if err := dso.Remove(ctx, spec.StackName, spec.Host, spec.IncludeVolumes); err != nil {
+		log.Printf("[DockerSwarm] Warning: stack removal failed for %s: %v", spec.StackName, err)
+	}
+
+	// Check context after stack removal
+	if err := checkContextCancelled(ctx); err != nil {
+		return fmt.Errorf("cleanup cancelled during directory removal: %w", err)
+	}
+
+	// Clean up deployment directory if specified
+	if spec.DeployDir != "" {
+		cleanupDirCmd := fmt.Sprintf("rm -rf %s", spec.DeployDir)
+		if _, err := dso.sshClient.ExecuteWithTimeout(spec.Host, cleanupDirCmd, 30*time.Second); err != nil {
+			log.Printf("[DockerSwarm] Warning: Failed to cleanup deployment directory %s: %v", spec.DeployDir, err)
+		}
+	}
+
+	log.Printf("[DockerSwarm] Cleanup completed for %s", spec.StackName)
+	return nil
+}
+
+// WaitForHealthy waits for a Swarm stack to become healthy
+// Respects both the timeout parameter and the context deadline (whichever comes first)
+func (dso *DockerSwarmOrchestrator) WaitForHealthy(ctx context.Context, stackName string, host string, timeout time.Duration) error {
+	// Validate SSH client is available
+	if dso.sshClient == nil {
+		return fmt.Errorf("SSH client is nil - cannot perform health check operations")
+	}
+
+	// Validate stack name (prevent shell injection)
+	if !isValidStackName(stackName) {
+		return fmt.Errorf("invalid stack name: only alphanumeric, hyphens, and underscores allowed")
+	}
+
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	// Create a timeout context that respects both the passed context and our timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Check every 5 seconds
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	attempt := 0
+	maxAttempts := int(timeout.Seconds() / 5)
+
+	for {
+		attempt++
+
+		// Explicit attempt limit as fallback (defense-in-depth)
+		if attempt > maxAttempts {
+			return fmt.Errorf("exceeded maximum health check attempts (%d)", maxAttempts)
+		}
+
+		// Check if context was cancelled or timed out
+		if err := checkContextCancelled(timeoutCtx); err != nil {
+			return fmt.Errorf("waiting for health cancelled after %d attempts: %w", attempt, err)
+		}
+
+		status, err := dso.HealthCheck(timeoutCtx, stackName, host)
+		if err == nil && status.Healthy {
+			log.Printf("[DockerSwarm] Stack %s is healthy", stackName)
+			return nil
+		}
+
+		log.Printf("[DockerSwarm] Waiting for %s to become healthy (attempt %d/%d): %s", stackName, attempt, maxAttempts, status.Message)
 
 		// Context-aware sleep: either timeout or ticker fires
 		select {

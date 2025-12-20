@@ -25,6 +25,7 @@ type CreateDeviceRequest struct {
 	TailscaleAddress  string                        `json:"tailscale_address,omitempty"`
 	PrimaryConnection models.PrimaryConnection      `json:"primary_connection,omitempty"`
 	MACAddress        string                        `json:"mac_address,omitempty"`
+	DomainSuffix      string                        `json:"domain_suffix,omitempty"` // Domain suffix for app URLs (e.g., "server1.home.arpa")
 	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
 	Credentials       services.DeviceCredentials    `json:"credentials" validate:"required"`
 }
@@ -43,6 +44,7 @@ type UpdateDeviceRequest struct {
 	TailscaleAddress  *string                   `json:"tailscale_address,omitempty"`
 	PrimaryConnection *models.PrimaryConnection `json:"primary_connection,omitempty"`
 	MACAddress        *string                   `json:"mac_address,omitempty"`
+	DomainSuffix      *string                   `json:"domain_suffix,omitempty"` // Domain suffix for app URLs
 	Metadata          map[string]interface{}    `json:"metadata,omitempty"`
 }
 
@@ -104,6 +106,7 @@ func (h *DeviceHandler) CreateDevice(c *fiber.Ctx) error {
 		TailscaleAddress:  req.TailscaleAddress,
 		PrimaryConnection: primaryConnection,
 		MACAddress:        req.MACAddress,
+		DomainSuffix:      req.DomainSuffix,
 		Status:            models.DeviceStatusUnknown,
 	}
 
@@ -175,6 +178,9 @@ func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
 	}
 	if req.MACAddress != nil {
 		updates["mac_address"] = *req.MACAddress
+	}
+	if req.DomainSuffix != nil {
+		updates["domain_suffix"] = *req.DomainSuffix
 	}
 	if req.Metadata != nil {
 		updates["metadata"] = req.Metadata

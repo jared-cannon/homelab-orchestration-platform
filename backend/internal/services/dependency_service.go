@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ type DependencyService struct {
 	softwareService   *SoftwareService
 	databasePool      *DatabasePoolManager
 	cachePool         *CachePoolManager
+	networkService    *NetworkService
 	infraConfig       *InfrastructureConfig
 	orchestrator      ContainerOrchestrator
 }
@@ -35,6 +37,7 @@ func NewDependencyService(
 	softwareService *SoftwareService,
 	databasePool *DatabasePoolManager,
 	cachePool *CachePoolManager,
+	networkService *NetworkService,
 	infraConfig *InfrastructureConfig,
 	orchestrator ContainerOrchestrator,
 ) *DependencyService {
@@ -46,6 +49,7 @@ func NewDependencyService(
 		softwareService: softwareService,
 		databasePool:    databasePool,
 		cachePool:       cachePool,
+		networkService:  networkService,
 		infraConfig:     infraConfig,
 		orchestrator:    orchestrator,
 	}
@@ -629,6 +633,7 @@ func (s *DependencyService) ProvisionDependencies(
 }
 
 // provisionReverseProxy deploys a reverse proxy using the orchestrator
+// Handles Traefik-specific setup including network creation and configuration
 func (s *DependencyService) provisionReverseProxy(
 	ctx context.Context,
 	plan ProvisionPlan,
@@ -646,10 +651,47 @@ func (s *DependencyService) provisionReverseProxy(
 		return fmt.Errorf("failed to get device: %w", err)
 	}
 
-	// Generate deployment directory and project name
-	projectName := fmt.Sprintf("%s-dep-%s", plan.RecipeSlug, uuid.New().String()[:8])
-	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
 	host := device.GetSSHHost()
+
+	// Detect orchestrator mode (compose vs swarm)
+	orchestratorMode, err := DetectOrchestratorMode(s.sshClient, host)
+	if err != nil {
+		log.Printf("[DependencyService] Failed to detect orchestrator mode, defaulting to compose: %v", err)
+		orchestratorMode = "compose"
+	}
+	log.Printf("[DependencyService] Deploying %s in %s mode on device %s", recipe.Name, orchestratorMode, device.Name)
+
+	// Create traefik-public network if it doesn't exist
+	// This is required for Traefik to route traffic to other containers
+	isSwarmMode := (orchestratorMode == "swarm")
+	if err := s.networkService.EnsureTraefikNetwork(device, isSwarmMode); err != nil {
+		return fmt.Errorf("failed to create Traefik network: %w", err)
+	}
+	log.Printf("[DependencyService] Traefik network '%s' is ready", TraefikNetworkName)
+
+	// Build environment variables for Traefik configuration
+	environment := s.buildTraefikEnvironment(device)
+
+	// Generate deployment directory and project name
+	projectName := fmt.Sprintf("%s-%s", plan.RecipeSlug, uuid.New().String()[:8])
+	deployDir := fmt.Sprintf("~/homelab-deployments/%s", projectName)
+
+	// Create deployment record in database BEFORE deploying
+	deployment := &models.Deployment{
+		ID:               uuid.New(),
+		DeviceID:         deviceID,
+		RecipeSlug:       plan.RecipeSlug,
+		RecipeName:       recipe.Name,
+		Status:           models.DeploymentStatusPreparing,
+		ComposeProject:   projectName,
+		OrchestratorMode: orchestratorMode,
+		UseTraefik:       false, // Traefik itself doesn't need Traefik routing
+	}
+
+	if err := s.db.WithContext(ctx).Create(deployment).Error; err != nil {
+		return fmt.Errorf("failed to create deployment record: %w", err)
+	}
+	log.Printf("[DependencyService] Created deployment record %s for %s", deployment.ID, recipe.Name)
 
 	// Create deployment spec
 	spec := DeploymentSpec{
@@ -657,16 +699,78 @@ func (s *DependencyService) provisionReverseProxy(
 		StackName:      projectName,
 		DeployDir:      deployDir,
 		ComposeContent: recipe.ComposeContent,
+		Environment:    environment,
 		Timeout:        10 * time.Minute,
 	}
 
+	// Update status to deploying
+	deployment.Status = models.DeploymentStatusDeploying
+	deployment.DeploymentLogs = fmt.Sprintf("Deploying %s to %s\n", recipe.Name, deployDir)
+	s.db.WithContext(ctx).Save(deployment)
+
 	// Deploy using orchestrator
 	if err := s.orchestrator.Deploy(ctx, spec); err != nil {
+		// Update status to failed
+		deployment.Status = models.DeploymentStatusFailed
+		deployment.ErrorDetails = err.Error()
+		deployment.DeploymentLogs += fmt.Sprintf("ERROR: %v\n", err)
+		s.db.WithContext(ctx).Save(deployment)
 		return fmt.Errorf("orchestrator deployment failed: %w", err)
 	}
 
+	// Update status to running
+	deployment.Status = models.DeploymentStatusRunning
+	deployment.DeploymentLogs += "Deployment successful\n"
+	now := time.Now()
+	deployment.DeployedAt = &now
+	s.db.WithContext(ctx).Save(deployment)
+
 	log.Printf("[DependencyService] Successfully deployed %s as dependency on device %s", recipe.Name, device.Name)
 	return nil
+}
+
+// buildTraefikEnvironment creates environment variables for Traefik configuration
+func (s *DependencyService) buildTraefikEnvironment(device *models.Device) map[string]string {
+	env := make(map[string]string)
+
+	// Set Traefik version from infrastructure config if available
+	if s.infraConfig != nil {
+		version := s.infraConfig.GetReverseProxyVersion("traefik")
+		if version != "" {
+			env["TRAEFIK_VERSION"] = version
+		}
+	}
+	if env["TRAEFIK_VERSION"] == "" {
+		env["TRAEFIK_VERSION"] = "v3.2"
+	}
+
+	// Container name
+	env["CONTAINER_NAME"] = "traefik"
+
+	// Let's Encrypt configuration
+	env["ACME_EMAIL"] = "admin@homelab.local" // Default email, user can customize later
+
+	// Dashboard configuration
+	domainSuffix := device.DomainSuffix
+	if domainSuffix == "" {
+		domainSuffix = device.GetDefaultDomainSuffix()
+	}
+	env["DASHBOARD_DOMAIN"] = fmt.Sprintf("traefik.%s", domainSuffix)
+	env["DASHBOARD_PORT"] = "8080"
+	env["DASHBOARD_USERNAME"] = "admin"
+	// Leave password empty for now - user should set this in production
+	env["DASHBOARD_PASSWORD_HASH"] = ""
+
+	return env
+}
+
+// containsIgnoreCase checks if a string contains a substring (case-insensitive)
+func containsIgnoreCase(s, substr string) bool {
+	s = strings.ToLower(s)
+	substr = strings.ToLower(substr)
+	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+		 strings.Contains(s, substr)))
 }
 
 // provisionDatabase provisions database (shared or dedicated)

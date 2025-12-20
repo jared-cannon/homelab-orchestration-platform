@@ -79,7 +79,7 @@ export function EditDeviceDialog({ device, open, onOpenChange }: EditDeviceDialo
       updates.tailscale_address = formData.tailscale_address || undefined
     }
     if (formData.primary_connection !== device.primary_connection) {
-      updates.primary_connection = formData.primary_connection
+      updates.primary_connection = formData.primary_connection as 'local' | 'tailscale'
     }
     if (formData.mac_address !== (device.mac_address || '')) {
       updates.mac_address = formData.mac_address || undefined

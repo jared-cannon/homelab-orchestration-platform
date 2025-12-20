@@ -82,7 +82,7 @@ feature_highlights:
   - "Multi-user support with access controls"
   - "Privacy-focused - your photos never leave your server"
 
-# Dependency Auto-Provisioning (NEW)
+# Dependency Auto-Provisioning
 dependencies:
   required:
     - type: reverse_proxy

@@ -115,7 +115,7 @@ func TestDeploymentService_CreateDeploymentAutoSelectDevice(t *testing.T) {
 	device1 := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "low-resource-device",
-		IPAddress:          "192.168.1.101",
+		LocalIPAddress:          "192.168.1.101",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{2048}[0],      // 2GB
 		AvailableRAMMB:     &[]int{512}[0],       // 512MB available
@@ -127,7 +127,7 @@ func TestDeploymentService_CreateDeploymentAutoSelectDevice(t *testing.T) {
 	device2 := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "high-resource-device",
-		IPAddress:          "192.168.1.102",
+		LocalIPAddress:          "192.168.1.102",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{16384}[0],     // 16GB
 		AvailableRAMMB:     &[]int{8192}[0],      // 8GB available
@@ -202,7 +202,7 @@ func TestDeploymentService_RecommendDevicesForRecipe(t *testing.T) {
 	device1 := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "minimal-device",
-		IPAddress:          "192.168.1.101",
+		LocalIPAddress:          "192.168.1.101",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{1024}[0],   // 1GB
 		AvailableRAMMB:     &[]int{512}[0],
@@ -214,7 +214,7 @@ func TestDeploymentService_RecommendDevicesForRecipe(t *testing.T) {
 	device2 := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "good-device",
-		IPAddress:          "192.168.1.102",
+		LocalIPAddress:          "192.168.1.102",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{4096}[0],   // 4GB
 		AvailableRAMMB:     &[]int{2048}[0],
@@ -226,7 +226,7 @@ func TestDeploymentService_RecommendDevicesForRecipe(t *testing.T) {
 	device3 := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "best-device",
-		IPAddress:          "192.168.1.103",
+		LocalIPAddress:          "192.168.1.103",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{16384}[0],  // 16GB
 		AvailableRAMMB:     &[]int{8192}[0],
@@ -305,7 +305,7 @@ func TestDeploymentService_RecommendDevices_InsufficientResources(t *testing.T) 
 	device := &models.Device{
 		ID:                 uuid.New(),
 		Name:               "insufficient-device",
-		IPAddress:          "192.168.1.101",
+		LocalIPAddress:          "192.168.1.101",
 		Status:             models.DeviceStatusOnline,
 		TotalRAMMB:         &[]int{512}[0],    // Only 512MB
 		AvailableRAMMB:     &[]int{256}[0],

@@ -86,7 +86,7 @@ export function DeviceDetailPage() {
           : '⚠️ Docker not installed'
 
         toast.success('Connection successful!', {
-          description: `Connected to ${device?.ip_address}. ${dockerInfo}`
+          description: `Connected to ${device?.local_ip_address}. ${dockerInfo}`
         })
       }
     } catch (error) {

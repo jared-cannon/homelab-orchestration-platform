@@ -112,11 +112,18 @@ config_options:
     default: false
     description: "Enable HTTP/3 (QUIC) protocol support (experimental)"
 
+  - name: swarm_mode
+    label: "Docker Swarm Mode"
+    type: boolean
+    default: false
+    required: false
+    description: "Enable Docker Swarm mode (automatically detected, but can be overridden)"
+
 # Post-installation steps
 post_install:
   - type: "message"
     title: "Network Created"
-    message: "The 'homelab-proxy' network has been created for your apps to use"
+    message: "The 'traefik-public' network has been created for your apps to use"
 
   - type: "message"
     title: "Dashboard Access"
@@ -125,9 +132,10 @@ post_install:
   - type: "message"
     title: "Next Steps"
     message: |
-      1. When deploying apps, enable "Proxy Mode" to use Traefik
-      2. Apps will automatically get HTTPS certificates via Let's Encrypt
-      3. Access apps via clean domains instead of IP:port combinations
+      1. Apps deployed with Traefik will automatically get clean DNS names
+      2. HTTPS certificates are provisioned automatically via Let's Encrypt
+      3. Access apps via https://app-name.device-domain instead of IP:port
+      4. Traefik works in both Docker Compose and Docker Swarm modes
 
 # Health monitoring
 health:

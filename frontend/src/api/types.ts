@@ -66,7 +66,7 @@ export interface WebSocketMessage {
 
 // Scanner types
 export interface DiscoveredDevice {
-  ip_address: string
+  local_ip_address: string
   mac_address?: string
   hostname?: string
   type: DeviceType
@@ -299,6 +299,8 @@ export interface CreateDeploymentRequest {
   recipe_slug: string
   device_id: string
   config: Record<string, any>
+  custom_hostname?: string
+  use_traefik?: boolean
 }
 
 // Curated Marketplace types

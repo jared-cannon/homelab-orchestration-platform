@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,10 @@ var (
 	ErrDependencyServiceNotInit = errors.New("dependency service not initialized")
 	ErrDependencyCheckFailed    = errors.New("failed to check dependencies")
 )
+
+// Hostname validation regex (compiled once for performance)
+// Pattern: alphanumeric start/end per label, hyphens allowed in middle, requires FQDN (at least one dot)
+var hostnameRegex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)+$`)
 
 // Configuration constants
 const (
@@ -44,6 +49,7 @@ type DeploymentService struct {
 	dbPoolManager      *DatabasePoolManager
 	cachePoolManager   *CachePoolManager
 	dependencyService  *DependencyService
+	networkService     *NetworkService
 	environmentBuilder *EnvironmentBuilder
 	configValidator    *ConfigValidator
 	deviceLocks        sync.Map // Map of device ID -> *sync.Mutex to prevent concurrent deployments
@@ -75,6 +81,9 @@ func NewDeploymentService(
 	dbPoolManager := NewDatabasePoolManager(db, sshClient, credService, infraConfig, orchestrator)
 	cachePoolManager := NewCachePoolManager(db, sshClient, infraConfig, orchestrator)
 
+	// Initialize network service for Docker network management
+	networkService := NewNetworkService(sshClient)
+
 	// Initialize services for DependencyService
 	// For software registry, use default path (will be overridden if already initialized in main)
 	softwareRegistry := NewSoftwareRegistry("./software-definitions")
@@ -99,6 +108,7 @@ func NewDeploymentService(
 		softwareService,
 		dbPoolManager,
 		cachePoolManager,
+		networkService,
 		infraConfig,
 		orchestrator,
 	)
@@ -114,6 +124,7 @@ func NewDeploymentService(
 		dbPoolManager:      dbPoolManager,
 		cachePoolManager:   cachePoolManager,
 		dependencyService:  dependencyService,
+		networkService:     networkService,
 		environmentBuilder: NewEnvironmentBuilder(credService, dbPoolManager),
 		configValidator:    NewConfigValidator(),
 	}
@@ -121,10 +132,12 @@ func NewDeploymentService(
 
 // CreateDeploymentRequest represents a request to create a deployment
 type CreateDeploymentRequest struct {
-	RecipeSlug     string                 `json:"recipe_slug"`
-	DeviceID       uuid.UUID              `json:"device_id,omitempty"`       // Optional - if not provided, will recommend
-	AutoSelectDevice bool                   `json:"auto_select_device"`       // Auto-select best device
-	Config         map[string]interface{} `json:"config"`
+	RecipeSlug      string                 `json:"recipe_slug"`
+	DeviceID        uuid.UUID              `json:"device_id,omitempty"`        // Optional - if not provided, will recommend
+	AutoSelectDevice bool                   `json:"auto_select_device"`        // Auto-select best device
+	Config          map[string]interface{} `json:"config"`
+	CustomHostname  string                 `json:"custom_hostname,omitempty"` // Optional custom hostname
+	UseTraefik      bool                   `json:"use_traefik"`               // Whether to use Traefik reverse proxy
 }
 
 // DeviceRecommendation represents a recommended device for a recipe
@@ -281,6 +294,25 @@ func (s *DeploymentService) CreateDeployment(req CreateDeploymentRequest) (*mode
 		Status:         models.DeploymentStatusValidating,
 		Config:         configJSON,
 		ComposeProject: s.generateProjectName(recipe.Slug),
+		UseTraefik:     req.UseTraefik, // Store UseTraefik preference from request
+	}
+
+	// Validate Traefik usage makes sense for this recipe
+	if req.UseTraefik {
+		// Check if recipe exposes any ports for Traefik to route
+		primaryPort := s.extractPrimaryPort(recipe.ComposeContent)
+		if primaryPort == 0 {
+			return nil, fmt.Errorf("cannot enable Traefik routing: recipe '%s' does not expose any ports", recipe.Name)
+		}
+	}
+
+	// Set custom hostname if provided
+	if req.CustomHostname != "" {
+		// Validate hostname format
+		if !isValidHostname(req.CustomHostname) {
+			return nil, fmt.Errorf("invalid custom hostname format: %s", req.CustomHostname)
+		}
+		deployment.Hostname = req.CustomHostname
 	}
 
 	// Save to database
@@ -731,6 +763,66 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	composeContent := recipe.ComposeContent
 	s.appendLog(deployment, "✓ Docker Compose prepared")
 
+	// TRAEFIK INTEGRATION: Inject Traefik labels if user requested it
+	if deployment.UseTraefik {
+		s.appendLog(deployment, "Configuring Traefik reverse proxy routing...")
+
+		// Detect orchestrator mode once for all Traefik operations
+		// Avoids duplicate SSH calls later in network creation
+		orchestratorMode, err := DetectOrchestratorMode(s.sshClient, device.GetSSHHost())
+		if err != nil {
+			// Error is non-fatal: we can safely default to compose mode
+			// Most homelabs use compose, and worst case is slightly suboptimal network config
+			log.Printf("[Deployment] Failed to detect orchestrator mode, defaulting to compose: %v", err)
+			orchestratorMode = "compose"
+		}
+		deployment.OrchestratorMode = orchestratorMode
+		s.appendLog(deployment, fmt.Sprintf("Using orchestrator mode: %s", orchestratorMode))
+
+		// Use custom hostname if set, otherwise generate default
+		hostname := deployment.Hostname
+		if hostname == "" {
+			hostname = s.GenerateDefaultHostname(recipe.Slug, device)
+			deployment.Hostname = hostname
+			// Save hostname immediately so it's preserved even if label injection fails
+			s.db.Save(deployment)
+			s.appendLog(deployment, fmt.Sprintf("Generated hostname: %s", hostname))
+		} else {
+			s.appendLog(deployment, fmt.Sprintf("Using custom hostname: %s", hostname))
+		}
+
+		// Extract service name and port from docker-compose
+		// For now, use recipe slug as service name and extract first exposed port
+		serviceName := recipe.Slug
+		internalPort := s.extractPrimaryPort(composeContent)
+
+		if internalPort == 0 {
+			s.appendLog(deployment, "⚠️  Warning: Could not detect primary port, using default port 80")
+			internalPort = 80
+		}
+
+		// Inject Traefik labels into compose content
+		modifiedCompose, err := s.environmentBuilder.InjectTraefikLabels(
+			composeContent,
+			serviceName,
+			hostname,
+			internalPort,
+			orchestratorMode,
+		)
+		if err != nil {
+			s.appendLog(deployment, fmt.Sprintf("⚠️  Warning: Failed to inject Traefik labels: %v", err))
+			// Continue without Traefik - non-critical
+		} else {
+			composeContent = modifiedCompose
+			s.appendLog(deployment, "✓ Traefik routing labels injected")
+
+			// Generate access URL (hostname and orchestrator mode already stored above)
+			scheme := "https" // Traefik uses HTTPS with Let's Encrypt
+			deployment.URL = fmt.Sprintf("%s://%s", scheme, hostname)
+			s.appendLog(deployment, fmt.Sprintf("App will be accessible at: %s", deployment.URL))
+		}
+	}
+
 	// Check for cancellation after template rendering
 	select {
 	case <-ctx.Done():
@@ -749,13 +841,19 @@ func (s *DeploymentService) executeDeployment(ctx context.Context, deployment *m
 	deployment.Config, _ = json.Marshal(sanitizedConfig)
 	s.db.Save(deployment)
 
-	// Ensure homelab-proxy network exists (required for Traefik and other proxy-based services)
-	s.appendLog(deployment, "Ensuring Docker networks are ready...")
-	if err := s.ensureProxyNetworkExists(device); err != nil {
-		s.appendLog(deployment, fmt.Sprintf("⚠️  Warning: Failed to ensure proxy network exists: %v", err))
-		// Don't fail deployment, just warn - the network might not be needed
-	} else {
-		s.appendLog(deployment, "✓ Docker network 'homelab-proxy' is ready")
+	// Ensure Traefik network exists if using Traefik routing
+	if deployment.UseTraefik {
+		s.appendLog(deployment, "Ensuring Traefik network is ready...")
+
+		// Use orchestrator mode already detected above (reuse to avoid duplicate SSH call)
+		isSwarmMode := (deployment.OrchestratorMode == "swarm")
+
+		if err := s.networkService.EnsureTraefikNetwork(device, isSwarmMode); err != nil {
+			s.appendLog(deployment, fmt.Sprintf("⚠️  Warning: Failed to ensure Traefik network exists: %v", err))
+			// Don't fail deployment, just warn - will try to continue
+		} else {
+			s.appendLog(deployment, fmt.Sprintf("✓ Docker network '%s' is ready", TraefikNetworkName))
+		}
 	}
 
 	// Extract ports from compose
@@ -870,27 +968,6 @@ func (s *DeploymentService) sanitizeConfig(config map[string]interface{}) map[st
 	}
 
 	return sanitized
-}
-
-// ensureProxyNetworkExists ensures the homelab-proxy network exists on the target device
-func (s *DeploymentService) ensureProxyNetworkExists(device *models.Device) error {
-	host := device.GetSSHHost()
-
-	// Check if network exists using Docker's native filtering (more portable than grep)
-	checkCmd := "docker network ls --filter name=^homelab-proxy$ --format '{{.Name}}'"
-	output, err := s.sshClient.ExecuteWithTimeout(host, checkCmd, 10*time.Second)
-
-	// If output is empty or error occurred, network doesn't exist
-	if err != nil || strings.TrimSpace(output) == "" {
-		// Network doesn't exist, create it
-		createCmd := "docker network create homelab-proxy --driver bridge"
-		if _, err := s.sshClient.ExecuteWithTimeout(host, createCmd, 30*time.Second); err != nil {
-			return fmt.Errorf("failed to create homelab-proxy network: %w", err)
-		}
-		log.Printf("[Deployment] Created homelab-proxy network on device %s", device.Name)
-	}
-
-	return nil
 }
 
 // deployToDevice deploys the rendered compose file to the target device (legacy)
@@ -1067,13 +1144,24 @@ func (s *DeploymentService) updateStatus(deployment *models.Deployment, status m
 	// Also log the status change
 	s.appendLog(deployment, fmt.Sprintf("Status changed to: %s", status))
 
-	// Broadcast status update via WebSocket
+	// Broadcast status update via WebSocket with URL information
 	if s.wsHub != nil {
-		s.wsHub.Broadcast("deployments", "deployment:status", map[string]interface{}{
+		broadcastData := map[string]interface{}{
 			"id":            deployment.ID,
 			"status":        deployment.Status,
 			"error_details": deployment.ErrorDetails,
-		})
+			"hostname":      deployment.Hostname,
+			"url":           deployment.URL,
+			"use_traefik":   deployment.UseTraefik,
+		}
+
+		// Add access URL if deployment is running and has a URL
+		if deployment.Status == models.DeploymentStatusRunning && deployment.URL != "" {
+			broadcastData["access_url"] = deployment.URL
+			broadcastData["message"] = fmt.Sprintf("Deployment successful! Access your app at: %s", deployment.URL)
+		}
+
+		s.wsHub.Broadcast("deployments", "deployment:status", broadcastData)
 	}
 }
 
@@ -1082,6 +1170,61 @@ func (s *DeploymentService) generateProjectName(recipeSlug string) string {
 	// Use recipe slug + short UUID for uniqueness
 	shortID := uuid.New().String()[:8]
 	return fmt.Sprintf("%s-%s", recipeSlug, shortID)
+}
+
+// GenerateDefaultHostname generates a default hostname for an app deployment
+// Uses the pattern: {recipe_slug}.{device_domain_suffix}
+// Example: vaultwarden.server1.home.arpa
+func (s *DeploymentService) GenerateDefaultHostname(recipeSlug string, device *models.Device) string {
+	// Get device's domain suffix (or generate default if not set)
+	domainSuffix := device.DomainSuffix
+	if domainSuffix == "" {
+		domainSuffix = device.GetDefaultDomainSuffix()
+	}
+
+	// Sanitize recipe slug to be DNS-safe (already done in models, but good to be explicit)
+	// Recipe slugs should already be lowercase and hyphenated, but double-check
+	safeRecipeSlug := strings.ToLower(recipeSlug)
+	safeRecipeSlug = strings.ReplaceAll(safeRecipeSlug, "_", "-")
+
+	hostname := fmt.Sprintf("%s.%s", safeRecipeSlug, domainSuffix)
+
+	// Defense-in-depth: validate the generated hostname
+	// If invalid, fall back to a safe default
+	if !isValidHostname(hostname) {
+		log.Printf("[WARNING] Generated invalid hostname '%s', using fallback", hostname)
+		return fmt.Sprintf("%s.homelab.local", safeRecipeSlug)
+	}
+
+	return hostname
+}
+
+// isValidHostname validates that a hostname follows proper DNS naming conventions
+// Per RFC 1035: total max 253 chars, each label max 63 chars, alphanumeric + hyphens
+// Labels must start and end with alphanumeric characters
+// Requires at least one dot (FQDN) for homelab use with Traefik/Let's Encrypt
+func isValidHostname(hostname string) bool {
+	if len(hostname) == 0 || len(hostname) > 253 {
+		return false
+	}
+
+	// Require at least one dot (reject single-label hostnames like "localhost")
+	// Homelab deployments need FQDN for Traefik routing and Let's Encrypt certificates
+	if !strings.Contains(hostname, ".") {
+		return false
+	}
+
+	// Check each DNS label is valid and within length limits
+	labels := strings.Split(hostname, ".")
+	for _, label := range labels {
+		labelLen := len(label)
+		if labelLen == 0 || labelLen > 63 {
+			return false
+		}
+	}
+
+	// Use pre-compiled regex for performance
+	return hostnameRegex.MatchString(strings.ToLower(hostname))
 }
 
 // acquireDeviceLock gets or creates a mutex for a specific device
@@ -1189,6 +1332,17 @@ func formatPortSpecs(portSpecs []PortSpec) string {
 		parts[i] = fmt.Sprintf("%d/%s", spec.Port, spec.Protocol)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// extractPrimaryPort extracts the first exposed port from docker-compose content
+// This is used for Traefik routing when the internal port isn't explicitly configured
+func (s *DeploymentService) extractPrimaryPort(composeContent string) int {
+	// Extract ports using the same logic as ExtractPortsFromCompose
+	ports := ExtractPortsFromCompose(composeContent)
+	if len(ports) > 0 {
+		return ports[0].Port
+	}
+	return 0
 }
 
 // cleanupFirewallPorts closes firewall ports that are no longer needed after deployment deletion

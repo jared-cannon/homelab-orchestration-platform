@@ -16,6 +16,10 @@ const badgeVariants = cva(
           'bg-amber-500/10 text-amber-700 dark:text-amber-400 ring-amber-500/20',
         danger:
           'bg-red-500/10 text-red-700 dark:text-red-400 ring-red-500/20',
+        destructive:
+          'bg-red-500/10 text-red-700 dark:text-red-400 ring-red-500/20',
+        outline:
+          'bg-transparent text-foreground ring-border',
       },
     },
     defaultVariants: {

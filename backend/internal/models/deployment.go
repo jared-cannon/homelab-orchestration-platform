@@ -38,6 +38,12 @@ type Deployment struct {
 	InternalPort     int              `json:"internal_port"`
 	ExternalPort     int              `json:"external_port,omitempty"`
 	ContainerID      string           `json:"container_id,omitempty"`
+
+	// DNS-friendly access configuration
+	Hostname         string           `json:"hostname,omitempty"`                                   // DNS hostname (e.g., "vaultwarden.server1.home.arpa")
+	URL              string           `json:"url,omitempty"`                                        // Full access URL (e.g., "https://vaultwarden.server1.home.arpa")
+	UseTraefik       bool             `gorm:"default:false" json:"use_traefik"`                     // Whether to use Traefik for routing (explicit opt-in)
+	OrchestratorMode string           `gorm:"default:compose" json:"orchestrator_mode"`             // "compose" or "swarm"
 	ComposeProject   string           `json:"compose_project,omitempty"`                    // Docker Compose project name
 	GeneratedCompose string           `gorm:"type:text" json:"generated_compose,omitempty"` // For debugging/transparency
 	DeploymentLogs   string           `gorm:"type:text" json:"deployment_logs,omitempty"`   // Logs from deployment process
@@ -63,4 +69,24 @@ func (d *Deployment) BeforeCreate(tx *gorm.DB) error {
 // TableName overrides the default table name
 func (Deployment) TableName() string {
 	return "deployments"
+}
+
+// GetAccessURL returns the URL for accessing the deployed app
+// Falls back to generating URL from hostname if URL field is empty
+func (d *Deployment) GetAccessURL() string {
+	if d.URL != "" {
+		return d.URL
+	}
+
+	// Fallback: generate URL from hostname if available
+	if d.Hostname != "" {
+		scheme := "http"
+		if d.UseTraefik {
+			scheme = "https" // Traefik typically uses HTTPS with Let's Encrypt
+		}
+		return scheme + "://" + d.Hostname
+	}
+
+	// Last resort: return empty (no URL available)
+	return ""
 }

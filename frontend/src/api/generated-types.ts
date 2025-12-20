@@ -137,6 +137,13 @@ export interface Deployment {
   internal_port: number /* int */;
   external_port?: number /* int */;
   container_id?: string;
+  /**
+   * DNS-friendly access configuration
+   */
+  hostname?: string; // DNS hostname (e.g., "vaultwarden.server1.home.arpa")
+  url?: string; // Full access URL (e.g., "https://vaultwarden.server1.home.arpa")
+  use_traefik: boolean; // Whether to use Traefik for routing
+  orchestrator_mode: string; // "compose" or "swarm"
   compose_project?: string; // Docker Compose project name
   generated_compose?: string; // For debugging/transparency
   deployment_logs?: string; // Logs from deployment process
@@ -189,9 +196,10 @@ export interface Device {
   name: string;
   type: DeviceType;
   local_ip_address: string;
-  tailscale_address?: string;
-  primary_connection: PrimaryConnection;
+  tailscale_address?: string; // Tailscale IP or hostname (optional)
+  primary_connection: PrimaryConnection; // Which connection to try first
   mac_address?: string;
+  domain_suffix?: string; // Domain suffix for apps (e.g., "server1.home.arpa")
   status: DeviceStatus;
   username: string; // SSH username (not sensitive)
   auth_type: AuthType; // Authentication method
@@ -274,24 +282,85 @@ export interface NFSMount {
  * Recipe represents a marketplace application recipe loaded from YAML
  */
 export interface Recipe {
+  /**
+   * Basic Information
+   */
   id: string;
   name: string;
   slug: string;
   category: string;
   tagline: string;
   description: string;
+  /**
+   * Branding
+   */
   icon_url: string;
-  resources: RecipeResources;
-  compose_template: string;
+  author: string;
+  website: string;
+  source_code: string;
+  /**
+   * Resource Requirements (for intelligent scheduler)
+   */
+  requirements: RecipeRequirements;
+  /**
+   * User Configuration
+   */
   config_options: RecipeConfigOption[];
-  post_deploy_instructions: string;
-  health_check: RecipeHealthCheck;
+  /**
+   * Database Provisioning (intelligent database pooling)
+   */
+  database: RecipeDatabaseConfig;
+  /**
+   * Cache Provisioning
+   */
+  cache: RecipeCacheConfig;
+  /**
+   * Volume Configuration
+   */
+  volumes: { [key: string]: RecipeVolumeConfig};
+  /**
+   * Post-deployment automation
+   */
+  post_install: RecipePostInstallStep[];
+  /**
+   * Health monitoring
+   */
+  health: RecipeHealthConfig;
+  /**
+   * Update configuration
+   */
+  updates: RecipeUpdateConfig;
+  /**
+   * Curated Marketplace Features (NEW)
+   */
+  saas_replacements?: SaaSReplacement[];
+  difficulty_level?: string; // "beginner", "intermediate", "advanced"
+  setup_time_minutes?: number /* int */; // Estimated setup time
+  feature_highlights?: string[]; // Key features for comparison tables
+  is_infrastructure?: boolean; // Infrastructure template (e.g., laravel-app-server)
+  server_type?: string; // "app_server", "web_server", "database_server", "worker_server", "cache_server"
+  /**
+   * Dependency Auto-Provisioning (NEW)
+   */
+  dependencies?: RecipeDependencies;
+  /**
+   * Legacy field
+   */
+  post_deploy_instructions?: string;
+  /**
+   * Legacy Resources field for backward compatibility
+   */
+  resources?: RecipeResources;
+  /**
+   * Legacy HealthCheck field
+   */
+  health_check?: RecipeHealthCheck;
 }
 /**
  * RecipeMetadata contains metadata about the recipe source and versioning
  */
 export interface RecipeMetadata {
-  source: string; // "local", "coolify", "portainer", etc.
+  source: string; // Recipe source (currently only "local")
   version: string; // Recipe version
   last_updated: string; // When recipe was last updated
   updated_at: string; // When we last fetched it
@@ -324,13 +393,232 @@ export interface RecipeConfigOption {
   description: string;
 }
 /**
- * RecipeHealthCheck defines health check parameters
+ * RecipeHealthCheck defines health check parameters (legacy)
  */
 export interface RecipeHealthCheck {
   path: string;
   port: number /* int */; // Port to check (defaults to 80 if not specified)
   expected_status: number /* int */;
   timeout_seconds: number /* int */;
+}
+/**
+ * RecipeRequirements defines resource requirements for intelligent scheduling
+ */
+export interface RecipeRequirements {
+  memory: {
+    minimum: string; // e.g., "512MB"
+    recommended: string; // e.g., "1GB"
+  };
+  storage: {
+    minimum: string; // e.g., "1GB"
+    recommended: string; // e.g., "5GB"
+    type: string; // "ssd", "hdd", "any"
+  };
+  cpu: {
+    minimum_cores: number /* int */;
+    recommended_cores: number /* int */;
+  };
+  reliability: string; // "high", "medium", "low"
+  always_on: boolean;
+}
+/**
+ * RecipeDatabaseConfig defines database provisioning configuration
+ */
+export interface RecipeDatabaseConfig {
+  engine: string; // "postgres", "mysql", "mariadb", "sqlite", "none"
+  auto_provision: boolean; // Enable automatic database provisioning
+  version?: string; // Database version (e.g., "15" for postgres)
+  env_prefix?: string; // Prefix for env vars (default: "DB_")
+}
+/**
+ * RecipeCacheConfig defines cache provisioning configuration
+ */
+export interface RecipeCacheConfig {
+  engine: string; // "redis", "memcached", "none"
+  auto_provision: boolean; // Enable automatic cache provisioning
+  version?: string; // Cache version
+  env_prefix?: string; // Prefix for env vars (default: "REDIS_" or "MEMCACHED_")
+}
+/**
+ * RecipeVolumeConfig defines volume configuration
+ */
+export interface RecipeVolumeConfig {
+  description: string;
+  size_estimate: string; // e.g., "5GB"
+  backup_priority: string; // "high", "medium", "low"
+  backup_frequency: string; // "daily", "weekly", "monthly"
+}
+/**
+ * RecipePostInstallStep defines a post-installation action
+ */
+export interface RecipePostInstallStep {
+  type: string; // "message", "command", "webhook"
+  title?: string;
+  message?: string;
+  command?: string;
+  url?: string;
+}
+/**
+ * RecipeHealthConfig defines health monitoring configuration
+ */
+export interface RecipeHealthConfig {
+  endpoint: string; // Health check HTTP path
+  interval: string; // e.g., "30s"
+  timeout: string; // e.g., "10s"
+  unhealthy_threshold: number /* int */; // Failures before marking unhealthy
+}
+/**
+ * RecipeUpdateConfig defines update behavior
+ */
+export interface RecipeUpdateConfig {
+  strategy: string; // "automatic", "manual", "notify"
+  backup_before_update: boolean; // Create backup before updating
+  rollback_on_failure: boolean; // Auto-rollback if update fails
+}
+/**
+ * SaaSReplacement defines which SaaS service this recipe replaces
+ */
+export interface SaaSReplacement {
+  name: string; // e.g., "Google Photos"
+  comparison_url?: string; // URL to comparison guide
+}
+/**
+ * RecipeDependencies defines required and recommended dependencies
+ */
+export interface RecipeDependencies {
+  required?: RecipeDependency[];
+  recommended?: RecipeDependency[];
+}
+/**
+ * RecipeDependency represents a single dependency
+ */
+export interface RecipeDependency {
+  type: string; // "reverse_proxy", "database", "cache", "application", "infrastructure"
+  name?: string; // Specific app name (for application dependencies)
+  engine?: string; // Database/cache engine (for database/cache dependencies)
+  min_version?: string; // Minimum version required
+  prefer?: string; // Preferred option (e.g., "traefik")
+  alternatives?: string[]; // Alternative options
+  shared?: boolean; // Use shared instance (default true for DB/cache)
+  auto_provision?: boolean; // Auto-provision if missing (default true)
+  auto_configure?: boolean; // Auto-configure connection
+  purpose?: string; // Human-readable purpose
+  message?: string; // Custom message to show user
+  for_volumes?: string[]; // Volumes to backup (for backup dependencies)
+}
+
+//////////
+// source: shared_cache.go
+
+/**
+ * SharedCacheInstance represents a shared cache server (Redis/Memcached)
+ * Used by CachePoolManager for resource-efficient cache provisioning
+ */
+export interface SharedCacheInstance {
+  id: string;
+  device_id: string;
+  engine: string; // redis, memcached
+  version: string;
+  name: string; // e.g., "shared-redis"
+  port: number /* int */; // Composite index with DeviceID for efficient port lookups
+  container_name: string;
+  max_memory_mb: number /* int */;
+  status: string; // provisioning, running, stopped, error (indexed for efficient status queries)
+  created_at: string;
+  updated_at: string;
+}
+/**
+ * ProvisionedCacheConfig represents per-application cache configuration within a shared instance
+ */
+export interface ProvisionedCacheConfig {
+  id: string;
+  cache_instance_id: string;
+  app_slug: string;
+  device_id: string;
+  database_number: number /* int */; // Redis database number (0-15), set to 0 for Memcached (unused)
+  key_prefix: string; // Optional key prefix for isolation
+  max_memory_mb: number /* int */; // Memory limit for this app
+  created_at: string;
+  updated_at: string;
+  /**
+   * Foreign key
+   */
+  cache_instance?: SharedCacheInstance;
+}
+
+//////////
+// source: shared_database.go
+
+/**
+ * SharedDatabaseInstance represents a shared database container running on a device
+ * Multiple applications can have isolated databases within a single shared instance
+ */
+export interface SharedDatabaseInstance {
+  id: string;
+  device_id: string;
+  device?: Device;
+  engine: string; // "postgres", "mysql", "mariadb"
+  version: string; // e.g., "15", "8.0"
+  status: string; // "provisioning", "running", "failed", "stopped"
+  /**
+   * Container information
+   */
+  container_id?: string;
+  container_name: string; // e.g., "homelab-postgres-shared"
+  compose_project: string; // Docker Compose project name
+  /**
+   * Connection details
+   */
+  port: number /* int */; // Exposed port on device
+  internal_port: number /* int */; // Container internal port (5432 for postgres, 3306 for mysql)
+  /**
+   * Master credentials (encrypted in credential store)
+   */
+  master_username: string; // Usually "postgres" or "root"
+  /**
+   * Resource tracking
+   */
+  estimated_ram_mb: number /* int */; // Estimated RAM usage
+  database_count: number /* int */; // Number of databases in this instance
+  /**
+   * Metadata
+   */
+  deployed_at?: string;
+  last_health_check?: string;
+  error_details?: string;
+  created_at: string;
+  updated_at: string;
+}
+/**
+ * ProvisionedDatabase represents an isolated database within a shared database instance
+ */
+export interface ProvisionedDatabase {
+  id: string;
+  shared_database_instance_id: string;
+  shared_instance?: SharedDatabaseInstance;
+  deployment_id: string; // One database per deployment
+  deployment?: Deployment;
+  /**
+   * Database details
+   */
+  database_name: string; // e.g., "nextcloud_abc123"
+  username: string; // e.g., "nextcloud_user"
+  /**
+   * Connection string components (injected as env vars into application)
+   */
+  host: string; // Device IP or hostname
+  port: number /* int */; // Shared instance port
+  /**
+   * Status
+   */
+  status: string; // "provisioning", "ready", "failed"
+  error_details?: string;
+  /**
+   * Metadata
+   */
+  provisioned_at?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 //////////

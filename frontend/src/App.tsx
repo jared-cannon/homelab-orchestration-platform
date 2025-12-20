@@ -3,6 +3,7 @@ import { Toaster } from 'sonner'
 import { DevicesPage } from './pages/Devices'
 import { DeviceDetailPage } from './pages/DeviceDetail'
 import { AppsPage } from './pages/Apps'
+import { MyAppsPage } from './pages/MyApps'
 import { RecipeDetailPage } from './pages/RecipeDetail'
 import { LoginPage } from './pages/Login'
 import { SetupPage } from './pages/Setup'
@@ -55,6 +56,16 @@ function AppContent() {
           <ProtectedRoute>
             <AuthLayout>
               <RecipeDetailPage />
+            </AuthLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-apps"
+        element={
+          <ProtectedRoute>
+            <AuthLayout>
+              <MyAppsPage />
             </AuthLayout>
           </ProtectedRoute>
         }

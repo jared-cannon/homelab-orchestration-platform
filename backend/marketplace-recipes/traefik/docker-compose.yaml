@@ -9,10 +9,12 @@ services:
       - "--api.dashboard=true"
       - "--api.insecure=false"
 
-      # Docker provider
+      # Docker provider (works for both Compose and Swarm)
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=homelab-proxy"
+      - "--providers.docker.network=traefik-public"
+      # Enable Swarm mode provider if using Docker Swarm
+      - "--providers.docker.swarmMode=${SWARM_MODE:-false}"
 
       # Entrypoints
       - "--entrypoints.web.address=:80"
@@ -50,7 +52,7 @@ services:
       - traefik-certificates:/letsencrypt
 
     networks:
-      - homelab-proxy
+      - traefik-public
 
     labels:
       - "traefik.enable=true"
@@ -75,11 +77,27 @@ services:
     environment:
       - TZ=UTC
 
+    # Swarm mode deployment configuration (ignored in Compose mode)
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
 volumes:
   traefik-certificates:
     driver: local
 
 networks:
-  homelab-proxy:
-    name: homelab-proxy
+  traefik-public:
+    name: traefik-public
     external: true
